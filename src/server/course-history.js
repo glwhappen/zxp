@@ -4,9 +4,12 @@ export function checkpoint(db, courseId, revision, actor, reason, { periodic = f
   const versionId = crypto.randomUUID()
   return [
     statement(db, `
-      INSERT OR IGNORE INTO course_versions (id, course_id, revision, saved_by, reason, public_history, title, description, category, theme)
+      INSERT OR IGNORE INTO course_versions (id, course_id, revision, saved_by, reason, public_history, title, description, category, theme, prerequisites)
       SELECT ?1, c.id, ?3, ?4, ?5, c.edit_mode = 'public' AND c.visibility = 'public' AND c.moderated_at IS NULL,
-        c.title, c.description, c.category, c.theme FROM courses c
+        c.title, c.description, c.category, c.theme,
+        (SELECT json_group_array(json_object('courseId', p.prerequisite_id, 'mode', p.mode) ORDER BY p.position)
+         FROM course_prerequisites p WHERE p.course_id = c.id)
+      FROM courses c
       WHERE c.id = ?2 AND (?6 = 0 OR NOT EXISTS (
         SELECT 1 FROM course_versions v WHERE v.course_id = c.id AND v.saved_at >= datetime('now', '-10 minutes')
       ))

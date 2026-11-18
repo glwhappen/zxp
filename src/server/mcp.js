@@ -1,7 +1,7 @@
 import { checkOrigin, choice, field, json, objectBody, RequestError } from './core.js'
 import {
-  CATEGORIES, courseDetail, joinCourse, listCourses, listStages, markLearned, METHODS,
-  saveCourse, saveStage, stageDetail, THEMES,
+  CATEGORIES, courseDetail, courseOverview, joinCourse, listCourses, listStages, markLearned, METHODS,
+  saveCourse, saveStage, studyStageDetail, THEMES,
 } from './learning.js'
 import { submitAnswer, submitFile } from './submissions.js'
 import { identify } from './auth.js'
@@ -12,6 +12,7 @@ import {
   addCourseStage, courseSharing, courseVersions, editModes, inspectCourseVersion,
   restoreCourseVersion, saveCourseLesson, saveCourseSharing, searchCourseEditors,
 } from './collaboration.js'
+import { prerequisiteModes } from './prerequisites.js'
 
 const version = '2026-07-28'
 const legacy = ['2025-11-25', '2025-06-18', '2025-03-26']
@@ -28,6 +29,10 @@ const pageNumber = { type: 'number', minimum: 1 }
 const course = {
   title: string, description: string, category: enumeration(CATEGORIES), theme: enumeration(THEMES),
   visibility, stageIds: array(string),
+  prerequisites: array({
+    type: 'object', properties: { courseId: string, mode: enumeration(prerequisiteModes) },
+    required: ['courseId', 'mode'], additionalProperties: false,
+  }),
 }
 const stage = {
   title: string,
@@ -54,8 +59,14 @@ tool('course_list', '列出公开、自己创建、可以管理或已经加入�
 }, [],
   ({ DB }, user, args) => listCourses(DB, user, args.scope), true)
 tool('course_get', '读取课程详情、关卡顺序和当前用户的学习进度。', { courseId: string }, ['courseId'],
-  ({ DB }, user, args) => courseDetail(DB, user, id(args, 'courseId')), true)
-tool('course_create', '创建课程。stageIds 按顺序引用已有的关卡。默认私有。', course, ['title'],
+  async ({ DB }, user, args) => courseOverview(await courseDetail(DB, user, id(args, 'courseId'))), true)
+tool('course_create', '创建课程。stageIds 只能引用自己的关卡，也可引用 newStages 里同次创建的新关卡标记。默认私有。', {
+  ...course,
+  newStages: array({
+    type: 'object', properties: { clientId: string, ...stage }, required: ['clientId', 'title', 'task'],
+    additionalProperties: false,
+  }),
+}, ['title'],
   ({ DB }, user, args) => saveCourse(DB, user, args))
 tool('course_update', '更新可编辑课程。先读取完整字段和 revision，可用 checkpoint 保存历史版本。', {
   courseId: string, ...course, expectedRevision, checkpoint: boolean,
@@ -86,13 +97,11 @@ tool('course_lesson_update', '更新本课程里的关卡名称、任务和讲�
 tool('course_stage_create', '在可编辑课程末尾创建关卡。新关卡使用课程的可见性。', {
   courseId: string, title: stage.title, task: stage.task, tutorial: stage.tutorial, methods: stage.methods, expectedRevision,
 }, ['courseId', 'title', 'task', 'expectedRevision'], ({ DB }, user, args) => addCourseStage(DB, user, id(args, 'courseId'), args))
-tool('stage_list', '列出可引用的公开关卡或自己拥有的关卡。', { scope: enumeration(['available', 'owned']) }, [],
+tool('stage_list', '列出自己创建、可在自己其他课程复用的关卡。', { scope: enumeration(['available', 'owned']) }, [],
   ({ DB }, user, args) => listStages(DB, user, args.scope), true)
 tool('stage_get', '读取学习任务、Markdown 教程、聚合人数与自己的提交。指定 courseId 可读取该课程里的讲义。', {
   stageId: string, courseId: string,
-}, ['stageId'], ({ DB }, user, args) => stageDetail(DB, user, id(args, 'stageId'), args.courseId), true)
-tool('stage_create', '创建独立的关卡。教程支持 Markdown，默认私有，每个关卡均可标记学会。', stage, ['title', 'task'],
-  ({ DB }, user, args) => saveStage(DB, user, args))
+}, ['stageId'], ({ DB }, user, args) => studyStageDetail(DB, user, id(args, 'stageId'), args.courseId), true)
 tool('stage_update', '更新自己创建的关卡。先读取现有字段，再提交完整表单。', { stageId: string, ...stage },
   ['stageId', 'title', 'task', 'tutorial', 'methods', 'visibility'],
   ({ DB }, user, args) => saveStage(DB, user, args, id(args, 'stageId')))

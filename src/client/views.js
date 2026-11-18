@@ -70,7 +70,7 @@ export function hero(course) {
 }
 
 export function coursePage(course, user) {
-  const next = course.stages.find(stage => !stage.learned) ?? course.stages[0]
+  const next = course.learningLocked ? null : course.stages.find(stage => !stage.learned) ?? course.stages[0]
   return `<p class="breadcrumb">${link('/', '探索课程', 'back', 'left')}</p>
     <section class="course-intro theme-${theme(course)}">
       <div class="cover-icon">${icon(topicIcon(course), 30)}</div>
@@ -81,10 +81,11 @@ export function coursePage(course, user) {
       </div>
       <div class="intro-actions">
         ${next ? link(stagePath(next.id, course), course.completedCount ? '继续学习' : '开始学习', 'btn primary', 'play') : ''}
-        ${!course.joined && !course.owned ? button('join', '加入我的学习', 'btn', 'plus') : ''}
+        ${!course.learningLocked && !course.joined && !course.owned ? button('join', '加入我的学习', 'btn', 'plus') : ''}
         ${course.canEdit ? link(coursePath(course.id) + '/edit', '编辑课程', 'btn', 'pen') : ''}
       </div>
     </section>
+    ${prerequisitePanel(course)}
     <section class="outline-card">
       <div class="section-head"><h2>课程关卡</h2><span class="subtle">${course.stageCount} 个关卡</span></div>
       ${user && course.stageCount ? progress(course) : ''}
@@ -92,13 +93,30 @@ export function coursePage(course, user) {
     </section>`
 }
 
+function prerequisitePanel(course) {
+  if (!course.prerequisites?.length) return ''
+  return `<section class="outline-card prerequisite-panel">
+    <div class="section-head"><h2>前置课程</h2>
+      ${course.learningLocked ? '<span class="visibility">' + icon('lock', 15) + ' 当前课程未解锁</span>' : ''}
+    </div>
+    ${course.learningLocked ? '<p>先完成必修的前置课程，标记其中的全部关卡为「学会了」，即可解锁本课程。</p>' : ''}
+    <ul class="prerequisite-list">${course.prerequisites.map(item => `<li>
+      <div class="step-text"><strong>${esc(item.title ?? '前置课程暂不可访问')}</strong>
+        <small>${item.mode === 'required' ? '必修' : '建议 · 可跳过'} · ${item.completed ? '已完成' : '未完成'}</small></div>
+      ${item.title ? link(coursePath(item.courseId), item.completed ? '查看课程' : '去学习', 'btn', 'arrow') : ''}
+    </li>`).join('')}</ul>
+  </section>`
+}
+
 export function outline(course, active) {
-  return course.stages.length ? `<ol class="outline">${course.stages.map((stage, i) =>
-    `<li><a href="${stagePath(stage.id, course)}" data-link ${active === stage.id ? 'aria-current="page"' : ''}>
+  return course.stages.length ? `<ol class="outline">${course.stages.map((stage, i) => {
+    const contents = `
       <span class="step-number ${stage.learned ? 'done' : ''}">${stage.learned ? icon('check', 16) : i + 1}</span>
-      <span class="step-text"><strong>${esc(stage.title)}</strong>${active ? '' : `<small>${esc(stage.task)}</small>`}</span>
-      ${icon('chevron', 16)}
-    </a></li>`).join('')}</ol>` : note('这门课还没有关卡。')
+      <span class="step-text"><strong>${esc(stage.title)}</strong>${active || course.learningLocked ? '' : `<small>${esc(stage.task)}</small>`}</span>
+      ${icon(course.learningLocked ? 'lock' : 'chevron', 16)}`
+    return `<li>${course.learningLocked ? `<div class="locked-step">${contents}</div>`
+      : `<a href="${stagePath(stage.id, course)}" data-link ${active === stage.id ? 'aria-current="page"' : ''}>${contents}</a>`}</li>`
+  }).join('')}</ol>` : note('这门课还没有关卡。')
 }
 
 export function stageStats(stage) {
@@ -183,14 +201,31 @@ export function pickedStages(editor) {
     const stage = editor.available.find(stage => stage.id === id)
     const attrs = `data-id="${esc(id)}"`
     return `<li><span class="step-number">${index + 1}</span><div class="step-text"><strong>${esc(stage?.title ?? id)}</strong>
-      <small>${stage?.visibility === 'public' ? '公开' : '私有'}${stage?.owned ? ' · 我的关卡' : ` · ${esc(stage?.author)}`}</small></div>
+      <small>${stage?.visibility === 'public' ? '公开' : '私有'}${stage?.owned ? ' · 我的关卡' : stage?.author ? ` · ${esc(stage.author)}` : ''}</small></div>
       ${editor.course ? button('edit-course-lesson', '', 'icon-btn', 'pen',
         `${attrs} aria-label="编辑课程讲义" title="编辑课程讲义"`)
         : stage?.owned ? button('edit-stage', '', 'icon-btn', 'pen', `${attrs} aria-label="编辑关卡" title="编辑关卡"`) : ''}
       ${button('move-up', '', 'icon-btn', 'up', `${attrs} aria-label="上移" ${index === 0 ? 'disabled' : ''}`)}
       ${button('move-down', '', 'icon-btn', 'down', `${attrs} aria-label="下移" ${index === editor.ids.length - 1 ? 'disabled' : ''}`)}
       ${button('remove-stage', '', 'icon-btn', 'close', `${attrs} aria-label="移除关卡" title="移除关卡"`)}</li>`
-  }).join('')}</ol>` : note('创建新的关卡，或从关卡库引用一个已有的关卡。')
+  }).join('')}</ol>` : note('在课程中创建关卡，或引用自己创建过的关卡。')
+}
+
+export function prerequisiteEditor(editor) {
+  const selected = editor.prerequisites
+  const available = editor.prerequisiteChoices.filter(item => !selected.some(entry => entry.courseId === item.id))
+  return `<ul class="prerequisite-list">${selected.map(item => `<li>
+    <div class="step-text"><strong>${esc(item.title ?? '前置课程暂不可访问')}</strong>${item.visibility === 'private' ? '<small>私有</small>' : ''}</div>
+    <select data-prerequisite-mode data-id="${esc(item.courseId)}" aria-label="${esc(item.title ?? '前置课程')}的学习要求">
+      ${options([['required', '必修'], ['recommended', '建议']], item.mode)}
+    </select>
+    ${button('remove-prerequisite', '', 'icon-btn', 'close', `data-id="${esc(item.courseId)}" aria-label="移除${esc(item.title ?? '前置课程')}"`)}
+  </li>`).join('')}</ul>
+  ${available.length ? `<div class="inline-actions prerequisite-picker">
+    <select data-prerequisite-choice aria-label="选择前置课程">${available.map(item =>
+      `<option value="${esc(item.id)}">${esc(item.title)}${item.visibility === 'private' ? '（私有）' : ''}</option>`).join('')}</select>
+    ${button('add-prerequisite', '添加前置课程', 'btn', 'plus', selected.length >= 12 ? 'disabled' : '')}
+  </div>` : '<p class="subtle">没有更多可添加的课程。</p>'}`
 }
 
 export function courseEditor(editor) {
@@ -213,9 +248,12 @@ export function courseEditor(editor) {
         <label>主题色<select name="theme">${options(Object.entries(themes), item.theme ?? 'violet')}</select></label>
         ${!item.id || item.owned ? `<label>可见性<select name="visibility">${visOptions(item.visibility)}</select></label>` : ''}
       </div>
+      ${!item.id || item.owned ? `<div class="editor-divider"></div><h2>前置课程</h2>
+        <p class="subtle">必修课程完成后解锁本课。建议课程可以跳过。公开课程使用公开的前置课程。</p>
+        <div data-prerequisite-editor>${prerequisiteEditor(editor)}</div>` : ''}
       <div class="editor-divider"></div>
       <div class="section-head editor-heading"><h2>课程关卡</h2><div class="inline-actions">
-        ${button('pick-stage', '引用已有', 'btn', 'link')}${button('new-stage', '新建关卡', 'btn', 'plus')}
+        ${!item.id || item.owned ? button('pick-stage', '引用已有', 'btn', 'link') : ''}${button('new-stage', '新建关卡', 'btn', 'plus')}
       </div></div>
       <div data-picked-stages>${pickedStages(editor)}</div>
       <p class="subtle">同一个关卡可以出现在多门课里。发布课程前，先公开其中所有关卡。</p>
@@ -237,9 +275,9 @@ export function stageEditor(stage, mode = 'stage') {
     ${lesson ? '<p class="subtle">这份讲义在当前课程显示。学习状态和提交按关卡共享。</p>'
       : `<fieldset><legend>提交方式</legend><div class="checks">${Object.entries(methods).map(([value, [label]]) =>
         `<label><input type="checkbox" name="methods" value="${value}" ${(stage?.methods ?? ['learned']).includes(value) ? 'checked' : ''} ${value === 'learned' ? 'disabled' : ''}> ${label}</label>`).join('')}</div></fieldset>`}
-    ${mode === 'stage' ? `<label>可见性<select name="visibility">${visOptions(stage?.visibility)}</select></label>` : ''}
+    ${mode === 'stage' || mode === 'course-draft-stage' ? `<label>可见性<select name="visibility">${visOptions(stage?.visibility)}</select></label>` : ''}
     ${lesson ? `<span data-lesson-save-status role="status">已保存</span>
       ${button('reload-course', '放弃草稿并加载最新版', 'btn', null, 'data-lesson-reload hidden')}` : ''}
-    <div class="form-error" role="alert" hidden></div><div class="submit-row"><button class="btn primary">${lesson ? '完成' : stage ? '保存关卡' : '创建关卡'}</button></div>
+    <div class="form-error" role="alert" hidden></div><div class="submit-row"><button class="btn primary">${lesson ? '完成' : stage?.id ? '保存关卡' : '创建关卡'}</button></div>
   </form>`
 }

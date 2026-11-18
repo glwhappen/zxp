@@ -1,11 +1,13 @@
 import { fail, field, requireUser, statement } from './core.js'
 import { joinFromStage, readableStage, stageDetail } from './learning.js'
+import { requireStageLearning } from './prerequisites.js'
 
 export const FILE_LIMIT = 10 * 1024 * 1024
 
 async function allowSubmission(db, user, stageId, kind, courseId) {
   requireUser(user)
   const stage = await readableStage(db, user, stageId, courseId)
+  await requireStageLearning(db, user, stageId, courseId)
   if (!stage.methods.includes(kind)) fail(409, '当前关卡未开启这种提交方式。')
 }
 
@@ -47,6 +49,7 @@ export async function submitFile(env, user, stageId, kind, filename, bytes, cour
   const key = 'submissions/' + crypto.randomUUID()
   await bucket.put(key, bytes)
   try {
+    await allowSubmission(db, user, stageId, kind, courseId)
     const result = await statement(db, `
       INSERT INTO submissions (stage_id, user_id, kind, object_key, filename, mime_type)
       VALUES (?, ?, ?, ?, ?, ?)

@@ -2,6 +2,7 @@ import { choice, fail, field, json, objectBody, requireUser, rows, statement } f
 import { commitCourse, editableCourse, expectEditor, expectRevision, guardCourse, sharedCourse } from './course-access.js'
 import { checkpoint } from './course-history.js'
 import { courseAtRevision, courseDetail, readableStage, stageDetail, stageInput } from './learning.js'
+import { insertPrerequisites } from './prerequisites.js'
 
 export const editModes = ['owner', 'shared', 'public']
 
@@ -80,7 +81,7 @@ export async function courseVersions(db, user, id, before = null) {
 
 async function versionForEditor(db, user, id, versionId) {
   const snapshot = await statement(db, `
-    SELECT v.id, v.revision, v.title, v.description, v.category, v.theme, v.reason, v.saved_at
+    SELECT v.id, v.revision, v.title, v.description, v.category, v.theme, v.reason, v.saved_at, v.prerequisites
     FROM course_versions v JOIN courses c ON c.id = v.course_id
     WHERE c.id = ?2 AND v.id = ?3 AND ${editableCourse('?1')} AND ${versionAccess}
   `, user.id, id, versionId).first()
@@ -94,7 +95,8 @@ export async function inspectCourseVersion(db, user, id, versionId) {
   const stages = await rows(statement(db, `
     SELECT stage_id AS id, title FROM course_version_stages WHERE version_id = ? ORDER BY position
   `, versionId))
-  return { ...snapshot, stages }
+  const { prerequisites, ...version } = snapshot
+  return { ...version, stages, prerequisiteCount: JSON.parse(prerequisites).length }
 }
 
 export async function restoreCourseVersion(db, user, id, versionId, input = {}) {
@@ -112,6 +114,10 @@ export async function restoreCourseVersion(db, user, id, versionId, input = {}) 
       SELECT ?, stage_id, position FROM course_version_stages WHERE version_id = ?`, id, versionId),
     statement(db, `INSERT INTO course_stage_content (course_id, stage_id, title, task, tutorial)
       SELECT ?, stage_id, title, task, tutorial FROM course_version_stages WHERE version_id = ?`, id, versionId),
+    ...(course.owned ? [
+      statement(db, 'DELETE FROM course_prerequisites WHERE course_id = ?', id),
+      insertPrerequisites(db, id, snapshot.prerequisites),
+    ] : []),
     ...checkpoint(db, id, revision + 1, user.id, 'restored'),
   ])
   return courseAtRevision(db, user, id, revision + 1)
@@ -181,6 +187,10 @@ export async function collaborationApi(request, db, user, url, id, action, resou
     if (method === 'POST' && resource) return json(await restoreCourseVersion(db, user, id, resource, await objectBody(request)))
   }
   if (action === 'stages') {
+    if (method === 'GET' && resource) {
+      await editingCourse(db, user, id)
+      return json(await readableStage(db, user, resource, id))
+    }
     if (method === 'POST' && !resource) return json(await addCourseStage(db, user, id, await objectBody(request)), 201)
     if (method === 'PUT' && resource) return json(await saveCourseLesson(db, user, id, resource, await objectBody(request)))
   }

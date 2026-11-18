@@ -1,6 +1,10 @@
 import { choice, fail, field, requireUser, rows, statement } from './core.js'
 import { commitCourse, editableCourse, expectEditor, expectRevision, guardCourse, publicCourse, readableCourse, sharedCourse } from './course-access.js'
 import { checkpoint } from './course-history.js'
+import {
+  insertPrerequisites, lockedByPrerequisites, prerequisiteInput, prerequisiteLockMessage, prerequisiteQuery,
+  requireStageLearning, validatePrerequisites,
+} from './prerequisites.js'
 
 export { publicCourse } from './course-access.js'
 
@@ -45,7 +49,7 @@ export async function listCourses(db, user, scope = 'public') {
 
 export async function courseDetail(db, user, courseId) {
   const id = user?.id ?? ''
-  const [courseResult, stageResult] = await db.batch([
+  const [courseResult, stageResult, requirementsResult] = await db.batch([
     statement(db, courseSelect + ` WHERE c.id = ?2 AND ${readableCourse('?1')}`, id, courseId),
     statement(db, `
       SELECT s.id, COALESCE(l.title, s.title) AS title, COALESCE(l.task, s.task) AS task, s.visibility, s.methods,
@@ -54,10 +58,12 @@ export async function courseDetail(db, user, courseId) {
       LEFT JOIN course_stage_content l ON l.course_id = c.id AND l.stage_id = s.id
       WHERE cs.course_id = ?2 AND ${readableCourse('?1')} ORDER BY cs.position
     `, id, courseId),
+    prerequisiteQuery(db, user, courseId),
   ])
   const course = courseResult.results[0]
   if (!course) fail(404, '课程不存在或当前账号无权访问。')
-  return { ...bools(course), stages: stageResult.results.map(stage => ({
+  const prerequisites = requirementsResult.results.map(item => ({ ...item, completed: Boolean(item.completed) }))
+  return { ...bools(course), prerequisites, learningLocked: lockedByPrerequisites(prerequisites), stages: stageResult.results.map(stage => ({
     ...stage, learned: Boolean(stage.learned), methods: enabledMethods(stage.methods),
   })) }
 }
@@ -68,15 +74,19 @@ export async function courseAtRevision(db, user, id, revision) {
   return course
 }
 
+export function courseOverview(course) {
+  if (!course.learningLocked) return course
+  return { ...course, stages: course.stages.map(({ id, title, learned, visibility }) => ({ id, title, learned, visibility })) }
+}
+
 export async function listStages(db, user, scope = 'available') {
   const id = user?.id ?? ''
   choice(scope, ['available', 'owned'], '关卡范围')
-  const where = scope === 'owned' ? 's.owner_id = ?' : "(s.owner_id = ? OR s.visibility = 'public')"
   const list = await rows(statement(db, `
-    SELECT s.id, s.title, s.task, s.visibility, s.owner_id = ? AS owned, u.name AS author
+    SELECT s.id, s.title, s.task, s.visibility, 1 AS owned, u.name AS author
     FROM stages s JOIN users u ON u.id = s.owner_id
-    WHERE ${where} ORDER BY s.updated_at DESC, s.title
-  `, id, id))
+    WHERE s.owner_id = ? ORDER BY s.updated_at DESC, s.title
+  `, id))
   return list.map(stage => ({ ...stage, owned: Boolean(stage.owned) }))
 }
 
@@ -136,6 +146,19 @@ export async function stageDetail(db, user, stageId, courseId) {
   return { ...stage, learned: Boolean(myLearned), stats, submissions: submissions.results }
 }
 
+export async function studyStageDetail(db, user, stageId, courseId) {
+  const stage = await stageDetail(db, user, stageId, courseId)
+  await requireStageLearning(db, user, stageId, courseId)
+  return stage
+}
+
+export async function ownedStage(db, user, stageId) {
+  requireUser(user)
+  const stage = await readableStage(db, user, stageId)
+  if (!stage.owned) fail(403, '只有关卡作者可以编辑关卡。')
+  return stage
+}
+
 async function commit(db, queries, conflict) {
   try {
     await db.batch(queries)
@@ -157,39 +180,57 @@ export async function saveCourse(db, user, data, courseId) {
   const theme = choice(data.theme ?? 'violet', THEMES, '课程主题色')
   const visibility = choice(data.visibility ?? current?.visibility ?? 'private', VISIBILITY, '课程可见性')
   if (current && !current.owned && visibility !== current.visibility) fail(403, '只有作者可以调整课程可见性。')
+  const existingPrerequisites = (current?.prerequisites ?? []).map(({ courseId, mode }) => ({ courseId, mode }))
+  const prerequisites = data.prerequisites === undefined ? existingPrerequisites : prerequisiteInput(data.prerequisites)
+  const requirementsChanged = JSON.stringify(prerequisites) !== JSON.stringify(existingPrerequisites)
+  if (requirementsChanged) {
+    if (current && !current.owned) fail(403, '只有作者可以调整前置课程。')
+    await validatePrerequisites(db, actor, prerequisites)
+  }
   const existingIds = current?.stages.map(stage => stage.id) ?? []
-  const ids = data.stageIds ?? existingIds
-  if (!Array.isArray(ids) || ids.length > maxStages || new Set(ids).size !== ids.length) {
+  const selection = data.stageIds ?? existingIds
+  if (!Array.isArray(selection) || selection.length > maxStages || new Set(selection).size !== selection.length) {
     fail(400, `每门课最多引用 ${maxStages} 个关卡，关卡不能重复。`)
   }
-  for (const id of ids) field(id, '关卡 ID', 100)
-  if (ids.length) {
-    const accessible = await rows(statement(db, `
-      SELECT s.id, s.visibility FROM stages s
-      WHERE (s.visibility = 'public' OR ${current && !current.owned
-        ? 'EXISTS (SELECT 1 FROM course_stages cs WHERE cs.stage_id = s.id AND cs.course_id = ?)'
-        : 's.owner_id = ?'})
-      AND s.id IN (SELECT value FROM json_each(?))
-    `, current && !current.owned ? courseId : actor, JSON.stringify(ids)))
-    if (accessible.length !== ids.length) fail(404, '选择中包含无法访问的关卡。')
-    if (visibility === 'public' && accessible.some(stage => stage.visibility !== 'public')) {
-      fail(409, '发布课程前，请先公开选中的关卡，或移除私有的关卡。')
-    }
+  for (const id of selection) field(id, '关卡 ID', 100)
+  const drafts = data.newStages ?? []
+  if (!Array.isArray(drafts) || drafts.length > selection.length || (current && drafts.length)) {
+    fail(400, '请在课程内添加新关卡。')
+  }
+  const newStages = new Map()
+  for (const draft of drafts) {
+    const clientId = field(draft?.clientId, '新关卡标记', 100)
+    if (!selection.includes(clientId) || newStages.has(clientId)) fail(400, '新关卡编排无效。')
+    newStages.set(clientId, { ...stageInput({ ...draft, visibility: draft.visibility ?? visibility }), id: crypto.randomUUID() })
+  }
+  const added = selection.filter(id => !newStages.has(id) && !existingIds.includes(id))
+  if (added.length) {
+    if (current && !current.owned) fail(403, '只有课程作者可以引用自己的已有关卡。')
+    const owned = await statement(db, `
+      SELECT COUNT(*) AS total FROM stages s
+      WHERE s.owner_id = ? AND s.id IN (SELECT value FROM json_each(?))
+    `, actor, JSON.stringify(added)).first()
+    if (owned.total !== added.length) fail(403, '只能引用自己创建的关卡。')
+  }
+  const ids = selection.map(id => newStages.get(id)?.id ?? id)
+  if (visibility === 'public' && [...newStages.values()].some(stage => stage.visibility === 'private')) {
+    fail(409, '发布课程前，请先公开选中的关卡，或移除私有的关卡。')
   }
   const id = courseId ?? crypto.randomUUID()
   const details = { title, description, category, theme, visibility }
   const reordered = JSON.stringify(ids) !== JSON.stringify(existingIds)
-  const changed = !current || reordered || Object.entries(details).some(([key, value]) => value !== current[key])
+  const changed = !current || reordered || requirementsChanged || Object.entries(details).some(([key, value]) => value !== current[key])
   if (!changed && !data.checkpoint) return current
   const queries = []
   if (current) {
     queries.push(guardCourse(db, id, actor, revision, { advance: changed }))
     if (changed) {
-      const structure = reordered || visibility !== current.visibility
+      const structure = reordered || requirementsChanged || visibility !== current.visibility
       queries.push(...checkpoint(db, id, revision, actor, structure ? 'structure' : 'interval', { periodic: !structure }))
       if (reordered) queries.push(statement(db, `
         DELETE FROM course_stages WHERE course_id = ? AND stage_id NOT IN (SELECT value FROM json_each(?))
       `, id, JSON.stringify(ids)))
+      if (requirementsChanged) queries.push(statement(db, 'DELETE FROM course_prerequisites WHERE course_id = ?', id))
       queries.push(statement(db, `
         UPDATE courses SET title = ?1, description = ?2, category = ?3, theme = ?4, visibility = ?5,
           edit_mode = CASE WHEN edit_mode = 'public' AND ?5 = 'private' THEN 'owner' ELSE edit_mode END,
@@ -200,6 +241,12 @@ export async function saveCourse(db, user, data, courseId) {
     queries.push(statement(db, `
       INSERT INTO courses (title, description, category, theme, visibility, id, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)
     `, title, description, category, theme, visibility, id, actor))
+  }
+  if (requirementsChanged) queries.push(insertPrerequisites(db, id, JSON.stringify(prerequisites)))
+  for (const stage of newStages.values()) {
+    queries.push(statement(db, `
+      INSERT INTO stages (id, owner_id, title, task, tutorial, methods, visibility) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, stage.id, actor, stage.title, stage.task, stage.tutorial, JSON.stringify(stage.methods), stage.visibility))
   }
   if (!current || reordered) {
     queries.push(statement(db, `
@@ -228,21 +275,21 @@ export function stageInput(data) {
 
 export async function saveStage(db, user, data, stageId) {
   const owner = requireUser(user)
-  if (stageId && !(await readableStage(db, user, stageId)).owned) fail(403, '只有关卡作者可以编辑关卡。')
+  if (!stageId) fail(405, '请在课程编辑页创建关卡。')
+  await ownedStage(db, user, stageId)
   const { title, task, tutorial, methods, visibility } = stageInput(data)
-  const id = stageId ?? crypto.randomUUID()
+  const id = stageId
   const values = [title, task, tutorial, JSON.stringify(methods), visibility, id, owner]
-  const write = stageId
-    ? statement(db, `UPDATE stages SET title = ?, task = ?, tutorial = ?, methods = ?, visibility = ?,
-        updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?`, ...values)
-    : statement(db, 'INSERT INTO stages (title, task, tutorial, methods, visibility, id, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)', ...values)
+  const write = statement(db, `UPDATE stages SET title = ?, task = ?, tutorial = ?, methods = ?, visibility = ?,
+    updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?`, ...values)
   await commit(db, [write], '该关卡正在被公开课程或其他作者引用，请先解除相关引用。')
   return stageDetail(db, user, id)
 }
 
 export async function joinCourse(db, user, courseId) {
   const id = requireUser(user)
-  await courseDetail(db, user, courseId)
+  const course = await courseDetail(db, user, courseId)
+  if (course.learningLocked) fail(403, prerequisiteLockMessage)
   await statement(db, `
     INSERT OR IGNORE INTO enrollments (course_id, user_id)
     SELECT c.id, ?1 FROM courses c WHERE c.id = ?2 AND ${readableCourse('?1')}
@@ -262,6 +309,7 @@ export async function joinFromStage(db, user, courseId, stageId) {
 export async function markLearned(db, user, stageId, learned, courseId) {
   const id = requireUser(user)
   await readableStage(db, user, stageId, courseId)
+  await requireStageLearning(db, user, stageId, courseId)
   if (typeof learned !== 'boolean') fail(400, 'learned 必须是布尔值。')
   if (learned) {
     await statement(db, 'INSERT OR IGNORE INTO progress (stage_id, user_id) VALUES (?, ?)', stageId, id).run()

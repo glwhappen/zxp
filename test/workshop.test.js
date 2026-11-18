@@ -140,20 +140,26 @@ async function register(username) {
 test('public levels share progress while private courses and submissions enforce ownership', async () => {
   const alice = await register('alice')
   const bob = await register('bob')
-  const stage = await data('/api/stages', { method: 'POST', cookie: alice, json: {
-    title: '我的共享关卡', task: '验证跨课程进度', tutorial: '## 练习',
-    methods: ['learned', 'answer', 'screenshot', 'file'], visibility: 'public',
-  } }, 201)
   const first = await data('/api/courses', { method: 'POST', cookie: alice, json: {
+    title: '公开课程', visibility: 'public', stageIds: ['shared-step'], newStages: [{
+      clientId: 'shared-step', title: '我的共享关卡', task: '验证跨课程进度', tutorial: '## 练习',
+      methods: ['learned', 'answer', 'screenshot', 'file'],
+    }],
+  } }, 201)
+  const [stage] = first.stages
+  const second = await data('/api/courses', { method: 'POST', cookie: alice, json: {
     title: '公开课程', visibility: 'public', stageIds: [stage.id],
   } }, 201)
-  const second = await data('/api/courses', { method: 'POST', cookie: bob, json: {
+  const privateCourse = await data('/api/courses', { method: 'POST', cookie: alice, json: {
     title: '私有课程', stageIds: [stage.id],
   } }, 201)
-  await data('/api/courses/' + second.id, { cookie: alice }, 404)
+  await data('/api/courses/' + privateCourse.id, { cookie: bob }, 404)
+  await data('/api/courses', { method: 'POST', cookie: bob, json: { title: '引用别人的关卡', stageIds: [stage.id] } }, 403)
+  await data('/api/stages', { method: 'POST', cookie: alice, json: { title: '独立关卡', task: '创建失败' } }, 405)
+  assert.deepEqual((await data('/api/stages', { cookie: bob })).map(item => item.id), [])
   const path = '/api/stages/' + stage.id
   await data(path, { method: 'PUT', cookie: bob, json: {} }, 403)
-  await data(path, { method: 'PUT', cookie: alice, json: { ...stage, visibility: 'private' } }, 409)
+  await data(path, { method: 'PUT', cookie: alice, json: { ...stage, tutorial: '## 练习', visibility: 'private' } }, 409)
   for (const answer of ['第一版', '第二版']) {
     const result = await data(path + '/answer', { method: 'PUT', cookie: bob, json: { answer, courseId: first.id } })
     assert.equal(result.stats.answer, 1)
@@ -211,9 +217,12 @@ test('MCP creates courses with a revocable user token', async () => {
   assert.equal(discovery.result.supportedVersions[0], '2026-07-28')
   const listing = await rpc('tools/list')
   assert(listing.result.tools.some(tool => tool.name === 'course_create'))
-  const created = await rpc('tools/call', { name: 'course_create', arguments: { title: 'MCP 课程', stageIds: ['api-setup'] } })
+  assert(!listing.result.tools.some(tool => tool.name === 'stage_create'))
+  const created = await rpc('tools/call', { name: 'course_create', arguments: {
+    title: 'MCP 课程', stageIds: ['step'], newStages: [{ clientId: 'step', title: 'MCP 关卡', task: '验证创建' }],
+  } })
   const course = JSON.parse(created.result.content[0].text)
-  assert.equal(course.stages[0].id, 'api-setup')
+  assert.equal(course.stages[0].title, 'MCP 关卡')
   assert.equal(course.visibility, 'private')
   assert.equal((await data('/api/courses?scope=owned', { cookie }))[0].id, course.id)
   const versions = await rpc('tools/call', { name: 'course_versions', arguments: { courseId: course.id } })
@@ -297,12 +306,13 @@ test('course wishes support discussion, public course links and author-only reso
 
 test('invited editors can collaborate on private courses and restore a complete checkpoint', async () => {
   const [author, editor, reader] = await Promise.all(['courseauthor', 'courseeditor', 'coursereader'].map(register))
-  const privateStage = await data('/api/stages', { method: 'POST', cookie: author, json: {
-    title: '私有练习', task: '练习任务', tutorial: '初始讲义', methods: ['answer'], visibility: 'private',
-  } }, 201)
   const initial = await data('/api/courses', { method: 'POST', cookie: author, json: {
-    title: '协作课程', stageIds: [privateStage.id, 'api-setup'],
+    title: '协作课程', stageIds: ['private-step', 'public-step'], newStages: [
+      { clientId: 'private-step', title: '私有练习', task: '练习任务', tutorial: '初始讲义', methods: ['answer'] },
+      { clientId: 'public-step', title: '公开练习', task: '练习任务', visibility: 'public' },
+    ],
   } }, 201)
+  const [privateStage, publicStage] = initial.stages
   const path = '/api/courses/' + initial.id
   const stagePath = '/api/stages/' + privateStage.id
   const scoped = stagePath + '?courseId=' + initial.id
@@ -326,7 +336,8 @@ test('invited editors can collaborate on private courses and restore a complete 
   await update(editor, { title: initial.title, visibility: 'public', expectedRevision: shared.revision }, 403)
   await update(editor, { title: '错账号的草稿', expectedEditorId: 'other', expectedRevision: shared.revision }, 409)
 
-  const beforeRace = { stageIds: [privateStage.id, 'api-setup'], expectedRevision: shared.revision }
+  await update(editor, { title: initial.title, stageIds: [privateStage.id, publicStage.id, 'api-setup'], expectedRevision: shared.revision }, 403)
+  const beforeRace = { stageIds: [privateStage.id, publicStage.id], expectedRevision: shared.revision }
   const writes = await Promise.all([
     request(path, { method: 'PUT', cookie: author, json: { ...beforeRace, title: '作者保存' } }),
     request(path, { method: 'PUT', cookie: editor, json: { ...beforeRace, title: '协作者保存' } }),
@@ -341,7 +352,7 @@ test('invited editors can collaborate on private courses and restore a complete 
   assert.equal((await data(stagePath, { cookie: author })).tutorial, '初始讲义')
   await data(stagePath + '/learned', { method: 'PUT', cookie: editor, json: { learned: true, courseId: initial.id } })
   const saved = await update(editor, {
-    title: '手动存档', stageIds: ['api-setup', privateStage.id], checkpoint: true, expectedRevision: lesson.course.revision,
+    title: '手动存档', stageIds: [publicStage.id, privateStage.id], checkpoint: true, expectedRevision: lesson.course.revision,
   })
   const { course: expanded, stage: newStage } = await data(path + '/stages', { method: 'POST', cookie: editor, json: {
     title: '后来增加的私有关卡', task: '完成新增任务', expectedRevision: saved.revision,
@@ -352,10 +363,10 @@ test('invited editors can collaborate on private courses and restore a complete 
   const baseline = versions.items.find(version => version.revision === 0)
   assert(versions.items.some(version => version.title === '手动存档' && version.reason === 'manual'))
   const restore = path + '/versions/' + baseline.id
-  assert.deepEqual((await data(restore, { cookie: editor })).stages.map(stage => stage.id), [privateStage.id, 'api-setup'])
+  assert.deepEqual((await data(restore, { cookie: editor })).stages.map(stage => stage.id), [privateStage.id, publicStage.id])
   const restored = await data(restore, { method: 'POST', cookie: editor, json: { expectedRevision: expanded.revision } })
   assert.equal(restored.title, initial.title)
-  assert.deepEqual(restored.stages.map(stage => stage.id), [privateStage.id, 'api-setup'])
+  assert.deepEqual(restored.stages.map(stage => stage.id), [privateStage.id, publicStage.id])
   const restoredLesson = await data(scoped, { cookie: editor })
   assert.equal(restoredLesson.tutorial, '初始讲义')
   assert.equal(restoredLesson.learned, true)
@@ -394,6 +405,85 @@ test('open collaboration allows signed-in contributors and keeps pre-public hist
     mode: 'owner', editorIds: [], expectedRevision: write.revision,
   } })
   await data(path + '/versions', { cookie: contributor }, 403)
+})
+
+test('required courses gate lessons and submissions until all required stages are learned', async () => {
+  const [author, student] = await Promise.all(['prereqauthor', 'prereqstudent'].map(register))
+  const create = (title, prerequisites, visibility = 'public') => data('/api/courses', {
+    method: 'POST', cookie: author, json: {
+      title, prerequisites, visibility, stageIds: ['step'],
+      newStages: [{ clientId: 'step', title, task: '练习', tutorial: '关卡讲义', methods: ['answer', 'file'] }],
+    },
+  }, 201)
+  const base = await create('基础课')
+  const recommended = await create('拓展课')
+  const required = courseId => ({ courseId, mode: 'required' })
+  const intermediate = await create('进阶课', [required(base.id)])
+  const capstone = await create('综合课', [required(intermediate.id), { courseId: recommended.id, mode: 'recommended' }])
+  const coursePath = '/api/courses/' + capstone.id
+  const stagePath = '/api/stages/' + capstone.stages[0].id
+  const scoped = stagePath + '?courseId=' + capstone.id
+  const pagePath = `/course/${capstone.id}/stage/${capstone.stages[0].id}`
+  const getView = () => data('/api/view?path=' + encodeURIComponent(pagePath), { cookie: student })
+  const learned = (course, value = true, status = 200) => data('/api/stages/' + course.stages[0].id + '/learned', {
+    method: 'PUT', cookie: student, json: { courseId: course.id, learned: value },
+  }, status)
+  const blocked = await data(coursePath, { cookie: student })
+  assert.equal(blocked.learningLocked, true)
+  assert.equal(blocked.stages[0].task, undefined)
+  assert.equal((await getView()).view.type, 'course')
+  await data(coursePath + '/join', { method: 'POST', cookie: student }, 403)
+  await data(scoped, { cookie: student }, 403)
+  await data(stagePath, { cookie: student }, 403)
+  await learned(capstone, true, 403)
+  await data(stagePath + '/answer', { method: 'PUT', cookie: student, json: { answer: '尝试跳过前置项' } }, 403)
+  await data(stagePath + '/upload/file?filename=exercise.txt&courseId=' + capstone.id, {
+    method: 'PUT', cookie: student, body: '尝试上传',
+  }, 403)
+  await data(coursePath + '/stages/' + capstone.stages[0].id, { cookie: student }, 403)
+  assert.equal((await data(coursePath + '/stages/' + capstone.stages[0].id, { cookie: author })).tutorial, '关卡讲义')
+  const { token } = await data('/api/token', { method: 'POST', cookie: student })
+  const mcp = await data('/mcp', { method: 'POST', headers: { Authorization: 'Bearer ' + token }, json: {
+    jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'stage_get', arguments: { stageId: capstone.stages[0].id } },
+  } })
+  assert.equal(mcp.result.isError, true)
+  await learned(intermediate, true, 403)
+  await learned(base)
+  await learned(intermediate)
+  const eligible = await data(coursePath, { cookie: student })
+  assert.equal(eligible.learningLocked, false)
+  assert.deepEqual(eligible.prerequisites.map(item => item.completed), [true, false])
+  assert.equal((await getView()).view.type, 'stage')
+  assert.equal((await data(coursePath + '/join', { method: 'POST', cookie: student })).joined, true)
+  await learned(capstone)
+  await learned(base, false)
+  await data(scoped, { cookie: student }, 403)
+})
+
+test('authors can restore prerequisites and cannot introduce cycles or inaccessible public requirements', async () => {
+  const author = await register('prereqmanager')
+  const required = courseId => ({ courseId, mode: 'required' })
+  const create = (title, visibility, prerequisites = []) => data('/api/courses', {
+    method: 'POST', cookie: author, json: { title, visibility, prerequisites },
+  }, 201)
+  const base = await create('私有基础课程', 'private')
+  const course = await create('暂存的进阶课程', 'private', [required(base.id)])
+  const coursePath = '/api/courses/' + course.id
+  const basePath = '/api/courses/' + base.id
+  const update = (path, json, status) => data(path, { method: 'PUT', cookie: author, json }, status)
+  await update(coursePath, { title: course.title, visibility: 'public', expectedRevision: 0 }, 409)
+  await update(basePath, { title: base.title, prerequisites: [required(course.id)], expectedRevision: 0 }, 409)
+  await update(basePath, { title: base.title, prerequisites: [required(base.id)], expectedRevision: 0 }, 409)
+  const checkpoint = (await data(coursePath + '/versions', { cookie: author })).items[0]
+  const stripped = await update(coursePath, { title: course.title, prerequisites: [], expectedRevision: 0 })
+  const restored = await data(coursePath + '/versions/' + checkpoint.id, {
+    method: 'POST', cookie: author, json: { expectedRevision: stripped.revision },
+  })
+  assert.deepEqual(restored.prerequisites.map(item => item.courseId), [base.id])
+  await update(basePath, { title: base.title, visibility: 'public', expectedRevision: 0 })
+  const published = await update(coursePath, { title: course.title, visibility: 'public', expectedRevision: restored.revision })
+  assert.equal(published.visibility, 'public')
+  await update(basePath, { title: base.title, visibility: 'private', expectedRevision: 1 }, 409)
 })
 
 async function oidcFlow({ badSignature = false, badNonce = false } = {}) {

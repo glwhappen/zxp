@@ -7,6 +7,7 @@
     <a href="https://skill-workshop-learning.mixedbobcat1.chatgpt.site">私人试用</a>
     · <a href="#快速开始">快速开始</a>
     · <a href="#创建课程">创建课程</a>
+    · <a href="#前置课程">前置课程</a>
     · <a href="#课程协作与历史">课程协作与历史</a>
     · <a href="#课程许愿">课程许愿</a>
     · <a href="#账号与管理">账号与管理</a>
@@ -21,7 +22,7 @@
 
 | 编排课程 | 边学边交 | 复用进度 |
 | :--- | :--- | :--- |
-| 从关卡库引用现有关卡，也可以创建新关卡。 | 把答案框、截图和文件上传放到教程中的对应步骤。 | 同一账号在多门课里学习同一关卡时，共用学会状态和提交记录。 |
+| 在课程中创建关卡，在自己的其他课程中复用。 | 把答案框、截图和文件上传放到教程中的对应步骤。 | 同一账号在多门课里学习同一关卡时，共用学会状态和提交记录。 |
 
 <details>
 <summary>查看教程内的提交界面</summary>
@@ -60,13 +61,19 @@ npm run dev
 
 | 项目 | 规则 |
 | --- | --- |
-| **可见性** | 课程与关卡创建时默认私有。公开课程出现在探索页，公开关卡可供其他作者引用。 |
-| **编辑权限** | 仅关卡作者可以修改原关卡。公开课程或其他作者仍在引用时，需先解除相关引用，才能把关卡改为私有。 |
+| **可见性** | 课程默认私有。公开课程出现在探索页，课程中创建的关卡可以由作者在自己的其他课程中引用。 |
+| **编辑权限** | 关卡库用于管理自己的原关卡。课程协作者可新建课内关卡、调整已有编排和修改课内讲义。历史上已经跨作者引用的关卡仍可学习。 |
 | **提交位置** | 每种提交方式显示一次。有手动插入的位置时，其他已开启的提交框放在教程末尾。未手动插入时，按教程步骤或段落自动安排。 |
 | **提交与进度** | 答案、截图和文件各保留最新一份，可随时覆盖。网页单个附件最多 10 MB。标记「学会了」是独立操作，课程进度按学会的关卡计算。 |
 | **人数与隐私** | 统计按账号去重，参与人数包含标记学会或提交过作业的用户。提交内容与附件仅本人可见，其他用户看到聚合人数。 |
 
 </details>
+
+## 前置课程
+
+课程作者可以在编辑页的「前置课程」选择自己的课程或其他公开课程，再设为**必修**或**建议**。必修课程的全部关卡标记为「学会了」之后，才能开始当前课程。课程链会逐级检查必修项。建议课程会显示在课程页，学生可以直接开始当前课程。
+
+公开课程使用公开的前置课程。互为前置的循环编排会被拒绝。课程作者恢复历史版本时，前置设置也会一并恢复。
 
 ## 课程协作与历史
 
@@ -84,7 +91,7 @@ npm run dev
 
 ## 账号与管理
 
-管理员登录后，可从左侧导航进入 `/admin`，查看账号和统计、下架或恢复课程、启用或关闭登录方式。下架会隐藏课程，关卡库中单独公开的关卡仍可引用。
+管理员登录后，可从左侧导航进入 `/admin`，查看账号和统计、下架或恢复课程、启用或关闭登录方式。下架会隐藏课程。
 
 | 登录方式 | 默认行为 |
 | --- | --- |
@@ -116,7 +123,7 @@ Sites 的私人访问限制在应用登录页面前生效。要让其他人在�
 
 ### 创建一门引用现有关卡的课程
 
-`stageIds` 决定关卡顺序。新关卡可以先用 `stage_create` 创建，再把返回的 ID 加入数组。
+`stageIds` 决定关卡顺序，可以填写 `stage_list` 返回的自有 ID，或填写同一次请求里 `newStages` 中定义的 `clientId`。
 
 ```json
 {
@@ -126,7 +133,10 @@ Sites 的私人访问限制在应用登录页面前生效。要让其他人在�
     "description": "先验证模型连接，再完成短片。",
     "category": "AI 创作",
     "visibility": "private",
-    "stageIds": ["api-setup", "video-shots"]
+    "stageIds": ["video-shots"],
+    "newStages": [
+      { "clientId": "video-shots", "title": "规划分镜", "task": "编写三个连续镜头" }
+    ]
   }
 }
 ```
@@ -142,13 +152,14 @@ Sites 的私人访问限制在应用登录页面前生效。要让其他人在�
 | `course_versions`、`course_version_get`、`course_restore` | 查看、预览和恢复课程存档 |
 | `course_lesson_update`、`course_stage_create` | 修改课内讲义，或在课程末尾创建关卡 |
 | `stage_list`、`stage_get` | 查找可引用关卡，读取教程、统计和自己的提交 |
-| `stage_create`、`stage_update` | 创建或更新独立关卡 |
+| `stage_update` | 更新自己创建的原关卡 |
 | `stage_mark_learned`、`stage_submit_answer`、`stage_submit_file` | 切换学会状态，提交答案或附件 |
 | `wish_list`、`wish_get`、`wish_replies` | 浏览许愿、关联课程和回复 |
 | `wish_create`、`wish_reply`、`wish_link_course` | 发布许愿、回复和关联公开课程 |
 | `wish_rate_course`、`wish_set_status` | 由许愿者评价关联课程、完结或重新打开 |
 
 - 更新课程时，先读取记录，再传入完整表单和当前 `revision`（作为 `expectedRevision`）。需要手动存档时传入 `checkpoint: true`。
+- 课程作者通过 `prerequisites` 配置前置课程。每项提供 `courseId`，并将 `mode` 设为 `required` 或 `recommended`。
 - 在 Markdown 教程的独立段落插入 `{{submit:answer}}`、`{{submit:screenshot}}` 或 `{{submit:file}}`，并在 `methods` 中开启对应方式。
 - 上传使用标准 Base64，单文件编码前最多 2 MiB。
 - 支持 `server/discover` 和早期客户端使用的 `initialize`。协议见 [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)。

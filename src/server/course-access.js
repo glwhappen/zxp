@@ -35,6 +35,8 @@ export async function commitCourse(db, queries) {
     return await db.batch(queries)
   } catch (error) {
     if (String(error.message).includes('valid_course_revision')) fail(409, '课程刚被更新。请读取最新版本后再保存。')
+    if (String(error.message).includes('prerequisite_cycle')) fail(409, '前置课程不能形成循环。')
+    if (String(error.message).includes('prerequisite_visibility')) fail(409, '前置课程的可见性与引用它的课程冲突，请先调整前置设置。')
     if (/course_stage_visibility|course_visibility/.test(error.message)) fail(409, '公开课程需要使用公开关卡，请检查关卡的可见性。')
     throw error
   }

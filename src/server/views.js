@@ -1,6 +1,7 @@
 import { RequestError, fail } from './core.js'
 import { adminApi } from './admin.js'
-import { courseDetail, listCourses, listStages, stageDetail } from './learning.js'
+import { courseDetail, courseOverview, listCourses, listStages, stageDetail, studyStageDetail } from './learning.js'
+import { prerequisiteChoices } from './prerequisites.js'
 import { listWishes, wishDetail } from './wishes.js'
 
 export function profileFor(user, settings) {
@@ -32,16 +33,20 @@ export async function readView(request, env, user, settings, path) {
       if (!user) return { type: 'sign-in', message: '登录后可以创建和编辑课程。' }
       const [course, stages] = await Promise.all([action ? courseDetail(db, user, id) : null, listStages(db, user)])
       if (course && !course.canEdit) fail(403, '当前账号没有课程编辑权限。')
-      const allowed = !course || course.owned ? stages : stages.filter(stage => stage.visibility === 'public')
+      const allowed = !course || course.owned ? stages : []
       const available = new Map(allowed.map(stage => [stage.id, stage]))
       for (const stage of course?.stages ?? []) available.set(stage.id, { ...available.get(stage.id), ...stage })
-      return { type: 'editor', course, available: [...available.values()] }
+      const choices = !course || course.owned ? await prerequisiteChoices(db, user, course?.id) : []
+      return { type: 'editor', course, available: [...available.values()], prerequisiteChoices: choices }
     }
-    if (section === 'course' && id && !action) return { type: 'course', course: await courseDetail(db, user, id) }
-    if (section === 'stage' && id && !action) return { type: 'stage', course: null, stage: await stageDetail(db, user, id) }
+    if (section === 'course' && id && !action) {
+      return { type: 'course', course: courseOverview(await courseDetail(db, user, id)) }
+    }
+    if (section === 'stage' && id && !action) return { type: 'stage', course: null, stage: await studyStageDetail(db, user, id) }
     if (section === 'course' && id && action === 'stage' && stageId && !extra) {
       const [course, stage] = await Promise.all([courseDetail(db, user, id), stageDetail(db, user, stageId, id)])
-      if (!course.stages.some(item => item.id === stage.id)) fail(404, '这门课程未引用该关卡。')
+      if (!course.stages.some(item => item.id === stageId)) fail(404, '这门课程未引用该关卡。')
+      if (course.learningLocked) return { type: 'course', course: courseOverview(course) }
       return { type: 'stage', course, stage }
     }
     fail(404, '页面不存在。')

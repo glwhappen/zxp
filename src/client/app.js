@@ -7,7 +7,7 @@ import { wishBoard, wishCoursePicker, wishCourses, wishDiscussion, wishForm, wis
 import { hasSubmissionMarker, submissionKinds, submissionMarker } from './tutorial.js'
 import {
   button, card, categories, courseEditor, coursePage, coursePath, esc, hero, key, link, note, outline,
-  pickedStages, progress, stageEditor, stagePage, stagePath, stageStats, submission, visibility,
+  pickedStages, prerequisiteEditor, progress, stageEditor, stagePage, stagePath, stageStats, submission, visibility,
 } from './views.js'
 
 const main = document.querySelector('#main')
@@ -123,7 +123,7 @@ function showMcp() {
   if (state.hosted) {
     showDialog('MCP 连接', `<p>在 ChatGPT 或 Codex 的「插件 → 个人 → 由你创建」中连接${productName}。</p>
       <p>让助手先列出关卡，再为你创建课程。例如：</p>
-      <blockquote>列出关卡库中可引用的关卡，把「配置大模型 API」加入一门叫「AI 视频练习」的私有课程。</blockquote>`)
+      <blockquote>列出我创建过的关卡，用其中一个关卡创建一门叫「AI 视频练习」的私有课程。</blockquote>`)
     return
   }
   showDialog('MCP 连接', `<p>在支持 Streamable HTTP 的 MCP 客户端中使用下方地址，添加 <code>Authorization: Bearer &lt;令牌&gt;</code> 请求头。</p>
@@ -216,11 +216,11 @@ function courseShelf(courses, scope) {
 
 function stagesPage(stages) {
   main.innerHTML = `<div class="page-heading section-head"><div><h1>关卡库</h1>
-    <p>浏览可复用的公开关卡，或创建你的独立关卡。</p></div>${button('new-stage', '新建关卡', 'btn primary', 'plus')}</div>
-    <div class="stage-grid">${stages.map(stage => `<a class="library-stage" data-link href="${stagePath(stage.id)}">
+    <p>管理你在课程中创建的关卡，可在自己的多门课程中复用。</p></div></div>
+    <div class="stage-grid">${stages.map(stage => `<button type="button" class="library-stage" data-action="edit-stage" data-id="${esc(stage.id)}">
       <span class="library-icon">${icon('layers', 22)}</span><span class="step-text"><strong>${esc(stage.title)}</strong>
-      <small>${esc(stage.task)}</small><small>${esc(stage.author)} · ${stage.visibility === 'public' ? '公开' : '私有'}</small></span>
-      ${icon('arrow', 16)}</a>`).join('') || note('还没有可用关卡。')}</div>`
+      <small>${esc(stage.task)}</small><small>${stage.visibility === 'public' ? '公开' : '私有'}</small></span>
+      ${icon('pen', 16)}</button>`).join('') || note('在课程编辑页创建的关卡会显示在这里。')}</div>`
 }
 
 function paintView({ profile, view }, path) {
@@ -248,7 +248,7 @@ function paintView({ profile, view }, path) {
       main.innerHTML = wishPage(view.wish, state.user)
       break
     case 'editor':
-      mountCourseEditor(view.course, view.available)
+      mountCourseEditor(view.course, view.available, view.prerequisiteChoices)
       break
     case 'course':
       state.current = { course: view.course }
@@ -282,7 +282,7 @@ function warmView(path) {
 }
 
 function warmNext(view, version) {
-  if (!view.course?.stages.length) return
+  if (!view.course?.stages.length || view.course.learningLocked) return
   const stages = view.course.stages
   const index = view.stage ? stages.findIndex(stage => stage.id === view.stage.id) : -1
   const next = view.stage
@@ -348,7 +348,11 @@ function paintPicked() {
 
 function courseDraft(editor, form) {
   const { title, description, category, theme, visibility } = Object.fromEntries(new FormData(form))
-  return { title, description, category, theme, visibility: visibility ?? editor.course?.visibility, stageIds: [...editor.ids] }
+  return {
+    title, description, category, theme, visibility: visibility ?? editor.course?.visibility, stageIds: [...editor.ids],
+    ...(!editor.course || editor.course.owned
+      ? { prerequisites: editor.prerequisites.map(({ courseId, mode }) => ({ courseId, mode })) } : {}),
+  }
 }
 
 function lessonDraft(form) {
@@ -371,8 +375,11 @@ function syncCourseEditor(editor, course, stage) {
   if (editor === state.editor) paintPicked()
 }
 
-function mountCourseEditor(course, available) {
-  const editor = { course, available, ids: course?.stages.map(stage => stage.id) ?? [], userId: state.user?.id }
+function mountCourseEditor(course, available, prerequisiteChoices = []) {
+  const editor = {
+    course, available, ids: course?.stages.map(stage => stage.id) ?? [], userId: state.user?.id,
+    newStages: new Map(), prerequisites: course?.prerequisites ?? [], prerequisiteChoices,
+  }
   state.editor = editor
   main.innerHTML = courseEditor(editor)
   if (!course) return
@@ -421,9 +428,9 @@ async function searchCollaborators() {
 }
 
 function chooseStageDialog() {
-  const entries = state.editor.available.filter(stage => !state.editor.ids.includes(stage.id))
+  const entries = state.editor.available.filter(stage => stage.owned && !state.editor.ids.includes(stage.id))
   showDialog('引用已有的关卡', `<label>搜索关卡<input type="search" placeholder="输入名称或作者" data-stage-filter></label>
-    <p class="subtle">${state.editor.course && !state.editor.course.owned ? '可以引用公开关卡。' : '可以引用公开关卡和你创建的私有关卡。'}</p>
+    <p class="subtle">从自己创建过的关卡中选择。</p>
     <div class="stage-options">${entries.map(stage => `<button type="button" class="stage-option" data-action="attach-stage" data-id="${esc(stage.id)}">
       <span class="step-text"><strong>${esc(stage.title)}</strong><small>${esc(stage.author)}</small></span>
       ${visibility(stage.visibility)}${icon('plus', 17)}</button>`).join('') || note('没有更多可引用的关卡。')}</div>`, true)
@@ -445,7 +452,7 @@ function applyStage(stage, kind, context) {
   const joinedCourseId = kind !== 'learned' || stage.learned ? context.course?.id : null
   const changesEnrollment = joinedCourseId && !context.course.joined
   views.invalidate((path, view) => (view.type === 'shelf' && (view.scope === 'joined' || changesEnrollment))
-    || (changesEnrollment && view.type === 'explore'))
+    || (changesEnrollment && view.type === 'explore') || (kind === 'learned' && view.course?.prerequisites?.length > 0))
   views.update(view => {
     if (view.stage?.id === stage.id) view.stage = { ...view.stage,
       learned: stage.learned, submissions: stage.submissions, stats: stage.stats }
@@ -660,6 +667,19 @@ async function handleAction(control) {
     case 'create-course':
       if (requireLogin()) await navigate('/course/new', true)
       break
+    case 'add-prerequisite':
+    case 'remove-prerequisite': {
+      const editor = state.editor
+      if (action === 'add-prerequisite') {
+        const selection = main.querySelector('[data-prerequisite-choice]').value
+        const course = editor.prerequisiteChoices.find(item => item.id === selection)
+        if (!course || editor.prerequisites.length >= 12) break
+        editor.prerequisites.push({ courseId: course.id, title: course.title, visibility: course.visibility, mode: 'recommended' })
+      } else editor.prerequisites = editor.prerequisites.filter(item => item.courseId !== id)
+      main.querySelector('[data-prerequisite-editor]').innerHTML = prerequisiteEditor(editor)
+      queueCourseDraft()
+      break
+    }
     case 'join':
       if (requireLogin()) {
         const context = state.current
@@ -692,7 +712,10 @@ async function handleAction(control) {
         if (await editor.autosave.flush() && editor === state.editor) {
           showDialog('为课程新建关卡', stageEditor(null, 'course-new-stage'), true)
         }
-      } else showDialog('新建关卡', stageEditor(), true)
+      } else if (editor) {
+        const visibility = main.querySelector('[data-form="course"]').elements.visibility.value
+        showDialog('为课程新建关卡', stageEditor({ visibility }, 'course-draft-stage'), true)
+      }
       break
     }
     case 'edit-course-lesson': {
@@ -701,7 +724,7 @@ async function handleAction(control) {
       if (editor !== state.editor) break
       const draft = editor.autosave.draft(id)
       if (!saved && (!draft || editor.lastLesson?.id !== id)) break
-      const stage = saved ? await api('stages/' + key(id) + '?courseId=' + key(editor.course.id))
+      const stage = saved ? await api('courses/' + key(editor.course.id) + '/stages/' + key(id))
         : { ...editor.lastLesson, ...draft }
       if (editor !== state.editor) break
       editor.lastLesson = stage
@@ -717,8 +740,9 @@ async function handleAction(control) {
     }
     case 'edit-stage':
       if (requireLogin()) {
-        const stage = id ? await api('stages/' + key(id)) : state.current.stage
-        showDialog('编辑关卡', stageEditor(stage), true)
+        const draft = state.editor?.newStages.get(id)
+        const stage = draft ?? await api('stages/' + key(id) + '?manage=1')
+        showDialog('编辑关卡', stageEditor(stage, draft ? 'course-draft-stage' : 'stage'), true)
       }
       break
     case 'insert-submission': {
@@ -755,6 +779,7 @@ async function handleAction(control) {
       break
     case 'remove-stage':
       state.editor.ids = state.editor.ids.filter(stageId => stageId !== id)
+      if (state.editor.newStages.delete(id)) state.editor.available = state.editor.available.filter(stage => stage.id !== id)
       paintPicked()
       queueCourseDraft()
       break
@@ -836,7 +861,8 @@ async function handleForm(form) {
         announce('已保存一个历史版本。')
         break
       }
-      const saved = await api('courses', { method: 'POST', body: { ...body, stageIds: editor.ids } })
+      const newStages = [...editor.newStages.values()].map(({ id, ...stage }) => ({ ...stage, clientId: id }))
+      const saved = await api('courses', { method: 'POST', body: { ...courseDraft(editor, form), newStages } })
       const path = coursePath(saved.id)
       views.invalidate()
       cachePage(path, { type: 'course', course: saved })
@@ -848,6 +874,20 @@ async function handleForm(form) {
       queueCourseDraft(form)
       if (await state.editor.autosave.flush() && dialog.contains(form)) dialog.close()
       break
+    case 'course-draft-stage': {
+      const editor = state.editor
+      const id = form.dataset.id || crypto.randomUUID()
+      const stage = { ...body, id, owned: true, methods: ['learned', ...data.getAll('methods')] }
+      if (editor.newStages.has(id)) editor.available = editor.available.map(item => item.id === id ? stage : item)
+      else {
+        editor.available.unshift(stage)
+        editor.ids.push(id)
+      }
+      editor.newStages.set(id, stage)
+      paintPicked()
+      dialog.close()
+      break
+    }
     case 'course-new-stage': {
       const editor = state.editor
       const { course, stage } = await api('courses/' + key(editor.course.id) + '/stages', {
@@ -875,23 +915,21 @@ async function handleForm(form) {
     }
     case 'stage': {
       const id = form.dataset.id
-      const saved = await api('stages' + (id ? '/' + key(id) : ''), {
-        method: id ? 'PUT' : 'POST', body: { ...body, methods: data.getAll('methods') },
+      const saved = await api('stages/' + key(id), {
+        method: 'PUT', body: { ...body, methods: data.getAll('methods') },
       })
       views.invalidate()
-      cachePage(stagePath(saved.id), { type: 'stage', course: null, stage: saved })
       dialog.close()
       if (!state.editor) {
-        await navigate(id && state.current?.stage?.id === id ? state.path : stagePath(saved.id), true)
+        await navigate()
       } else {
-        const { available, ids } = state.editor
+        const { available } = state.editor
         const index = available.findIndex(stage => stage.id === saved.id)
         if (index < 0) available.unshift(saved)
         else available[index] = saved
-        if (!id) ids.push(saved.id)
         paintPicked()
       }
-      announce(id ? '关卡已保存。' : '关卡已创建。')
+      announce('关卡已保存。')
       break
     }
     case 'answer':
@@ -976,6 +1014,10 @@ document.addEventListener('submit', async event => {
 
 document.addEventListener('input', event => {
   const input = event.target
+  if (input.matches('[data-prerequisite-mode]')) {
+    const requirement = state.editor.prerequisites.find(item => item.courseId === input.dataset.id)
+    requirement.mode = input.value
+  }
   if (!event.isComposing && ['course', 'course-lesson'].includes(input.form?.dataset.form)) queueCourseDraft(input.form)
   if (input.matches('[data-form="course-sharing"] select[name="mode"]')) {
     dialog.querySelector('[data-collaborator-picker]').hidden = input.value !== 'shared'
