@@ -166,7 +166,33 @@ function submissionSlot(stage, kind) {
   return `<div data-submission="${kind}">${submission(stage, kind)}</div>`
 }
 
-function tutorialPanel(stage) {
+// 教程里的 {{ask:问题}}：窄输入框；带选项时是单选，选「其他」再自己填。
+function askSlot(stage, field, signedIn = true) {
+  const answer = (stage.answers ?? []).find(item => item.field === field.name)?.value ?? ''
+  const choice = field.options.length > 0
+  const matched = choice && field.options.includes(answer)
+  const others = choice && answer && !matched
+  const selected = matched ? answer : others ? '其他' : ''
+  if (!signedIn) {
+    return `<div class="ask-field ${answer ? 'filled' : ''}" data-ask-field data-field="${esc(field.name)}" data-kind="locked">
+      <div class="ask-title">${icon('text', 15)}<span>${esc(field.name)}</span></div>
+      <p class="subtle">登录后可以在这里填写。</p>
+    </div>`
+  }
+  return `<div class="ask-field ${answer ? 'filled' : ''}" data-ask-field data-field="${esc(field.name)}" data-kind="${choice ? 'choice' : 'text'}">
+    <div class="ask-title">${icon('text', 15)}<span>${esc(field.name)}</span><span class="saved ask-saved">已填</span></div>
+    ${choice
+      ? `<select data-ask-select aria-label="${esc(field.name)}">
+          <option value="">请选择</option>
+          ${field.options.map(option => `<option value="${esc(option)}" ${option === selected ? 'selected' : ''}>${esc(option)}</option>`).join('')}
+          <option value="其他" ${selected === '其他' ? 'selected' : ''}>其他…</option>
+        </select>
+        <input data-ask-custom aria-label="${esc(field.name)}自定义内容" maxlength="2000" placeholder="写你自己的一类" value="${esc(others ? answer : '')}" ${others ? '' : 'hidden'}>`
+      : `<input data-ask-text aria-label="${esc(field.name)}" maxlength="2000" placeholder="简短写一下" value="${esc(answer)}">`}
+  </div>`
+}
+
+function tutorialPanel(stage, signedIn) {
   const kinds = submissionKinds.filter(kind => stage.methods.includes(kind) || stage.submissions.some(entry => entry.kind === kind))
   if (!stage.tutorial) {
     return kinds.length ? `<section class="lesson-panel"><h2>${icon('upload', 20)} 练习提交</h2>
@@ -174,7 +200,8 @@ function tutorialPanel(stage) {
   }
 
   const { blocks, remaining } = layoutTutorial(stage.tutorial, kinds)
-  const content = blocks.map(block => block.kind ? submissionSlot(stage, block.kind) : `<div class="markdown">${DOMPurify.sanitize(block.html, {
+  const content = blocks.map(block => block.kind ? submissionSlot(stage, block.kind)
+    : block.field ? askSlot(stage, block.field, signedIn) : `<div class="markdown">${DOMPurify.sanitize(block.html, {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea', 'style', 'iframe'],
     FORBID_ATTR: ['style', 'id', 'class'],
@@ -187,7 +214,7 @@ function tutorialPanel(stage) {
   </section>`
 }
 
-export function stagePage(stage, course, entry) {
+export function stagePage(stage, course, entry, signedIn) {
   const number = course ? course.stages.findIndex(item => item.id === stage.id) + 1 : null
   const titles = new Map((course?.stages ?? []).map(item => [item.id, item.title]))
   const waiting = (entry?.requires ?? [])
@@ -212,7 +239,7 @@ export function stagePage(stage, course, entry) {
           <div class="lesson-status"><div class="stats" data-stage-stats>${stageStats(stage)}</div>${submissionSlot(stage, 'learned')}</div>
         </header>
         <section class="task-box"><h2>${icon('target', 20)} 学习任务</h2><p>${esc(stage.task)}</p></section>
-        ${tutorialPanel(stage)}
+        ${tutorialPanel(stage, signedIn)}
       </article>`
   return `<p class="breadcrumb">${course ? link(coursePath(course.id), esc(course.title), 'back', 'left') : link('/stages', '我的关卡', 'back', 'left')}</p>
     <div class="learning-layout ${course ? '' : 'standalone'}">
@@ -306,6 +333,11 @@ export function stageEditor(stage, mode = 'stage') {
       <p class="subtle" data-placement-status role="status">将光标放在练习题后，插入对应的提交框。</p>
       <div class="inline-actions">${submissionKinds.filter(kind => !lesson || stage.methods.includes(kind))
         .map(kind => button('insert-submission', '插入' + methods[kind][0], 'btn', methods[kind][1], `data-kind="${kind}"`)).join('')}</div>
+      <div class="ask-tools">
+        <input data-ask-question maxlength="60" placeholder="提问，例如：你准备做哪一类？">
+        <input data-ask-options maxlength="200" placeholder="选项（逗号分隔，留空就是文本框）">
+        ${button('insert-ask', '插入提问', 'btn', 'text')}
+      </div>
     </div>
     ${lesson ? '<p class="subtle">这份讲义在当前课程显示。学习状态和提交按关卡共享。</p>'
       : `<fieldset><legend>提交方式</legend><div class="method-rows">${Object.entries(methods).map(([value, [label]]) => {

@@ -277,6 +277,31 @@ test('required submissions gate the learned state everywhere', async () => {
   } }, 400)
 })
 
+test('learners can fill small ask fields attached to tutorial steps', async () => {
+  const owner = await register('askowner')
+  const learner = await register('asklearner')
+  const tutorial = '## 第一步\n\n{{ask:你准备做哪一类？|模板,教案,表格}}\n\n{{ask:补充一句}}'
+  const course = await data('/api/courses', { method: 'POST', cookie: owner, json: {
+    title: '提问关卡课程', visibility: 'public', stageIds: ['ask-step'],
+    newStages: [{ clientId: 'ask-step', title: '提问关卡', task: '写下你的方向', tutorial, methods: ['learned'] }],
+  } }, 201)
+  const stageId = course.stages[0].id
+  const path = '/api/stages/' + stageId + '/field'
+  const saved = await data(path, { method: 'PUT', cookie: learner, json: { field: '你准备做哪一类？', value: '教案' } })
+  assert.deepEqual(saved, { field: '你准备做哪一类？', value: '教案' })
+  await data(path, { method: 'PUT', cookie: learner, json: { field: '补充一句', value: '先把开学第一周做完' } })
+  const detail = await data('/api/stages/' + stageId, { cookie: learner })
+  assert.deepEqual(detail.answers.map(item => [item.field, item.value]).sort(),
+    [['你准备做哪一类？', '教案'], ['补充一句', '先把开学第一周做完']].sort())
+  const ownerView = await data('/api/stages/' + stageId, { cookie: owner })
+  assert.deepEqual(ownerView.answers, [])
+  await data(path, { method: 'PUT', cookie: learner, json: { field: '补充一句', value: '' } })
+  assert.deepEqual((await data('/api/stages/' + stageId, { cookie: learner })).answers.map(item => item.field), ['你准备做哪一类？'])
+  await data(path, { method: 'PUT', cookie: learner, json: { field: 'a'.repeat(61), value: 'x' } }, 400)
+  await data(path, { method: 'PUT', cookie: learner, json: { field: '合法名称', value: 'x'.repeat(2001) } }, 400)
+  await data(path, { method: 'PUT', json: { field: '匿名', value: 'x' } }, 401)
+})
+
 test('course stage dependencies lock later stages until prerequisites are learned', async () => {
   const owner = await register('depowner')
   const learner = await register('deplearner')

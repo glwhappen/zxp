@@ -5,7 +5,8 @@ import { authenticate, identify, manageToken } from './auth.js'
 import { checkOrigin, fail, json, objectBody, readBytes, RequestError, requireUser } from './core.js'
 import { seedExamples } from './examples.js'
 import {
-  courseDetail, courseOverview, joinCourse, listCourses, listStages, markLearned, ownedStage, saveCourse, saveStage, studyStageDetail,
+  courseDetail, courseOverview, joinCourse, listCourses, listStages, markLearned, ownedStage,
+  saveCourse, saveFieldAnswer, saveStage, studyStageDetail,
 } from './learning.js'
 import { downloadFile, FILE_LIMIT, submitAnswer, submitFile } from './submissions.js'
 import { handleMcp } from './mcp.js'
@@ -79,6 +80,11 @@ async function api(request, env, url) {
       const result = action === 'learned' ? await markLearned(db, user, id, data.learned, data.courseId)
         : await submitAnswer(db, user, id, data.answer, data.courseId)
       return json(result)
+    }
+    if (id && action === 'field' && method === 'PUT') {
+      requireUser(user)
+      const data = await objectBody(request)
+      return json(await saveFieldAnswer(db, user, id, data.field, data.value))
     }
     if (id && action === 'upload' && ['screenshot', 'file'].includes(extra)) {
       if (method === 'GET') return downloadFile(env, user, id, extra, url.searchParams.get('preview') === '1')

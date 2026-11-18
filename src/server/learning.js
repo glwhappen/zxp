@@ -151,7 +151,7 @@ export async function readableStage(db, user, stageId, courseId) {
 
 export async function stageDetail(db, user, stageId, courseId) {
   const id = user?.id ?? ''
-  const [stageResult, counts, submissions] = await db.batch([
+  const [stageResult, counts, submissions, answers] = await db.batch([
     stageQuery(db, user, stageId, courseId),
     statement(db, `
       SELECT
@@ -169,11 +169,15 @@ export async function stageDetail(db, user, stageId, courseId) {
     statement(db, `
       SELECT kind, answer, filename, updated_at FROM submissions WHERE stage_id = ? AND user_id = ?
     `, stageId, id),
+    statement(db, `
+      SELECT field, value, updated_at FROM stage_answers WHERE stage_id = ? AND user_id = ? ORDER BY field
+    `, stageId, id),
   ])
   const stage = stageData(stageResult.results[0])
   const { myLearned, ...stats } = counts.results[0]
   const missing = missingRequired(stage.required, submissions.results.map(entry => entry.kind))
-  return { ...stage, learned: Boolean(myLearned) && !missing.length, stats, submissions: submissions.results, missing }
+  return { ...stage, learned: Boolean(myLearned) && !missing.length, stats,
+    submissions: submissions.results, answers: answers.results, missing }
 }
 
 export async function studyStageDetail(db, user, stageId, courseId) {
@@ -360,6 +364,28 @@ export async function saveStage(db, user, data, stageId) {
     visibility = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?`, ...values)
   await commit(db, [write], '该关卡正在被公开课程或其他作者引用，请先解除相关引用。')
   return stageDetail(db, user, id)
+}
+
+
+// 教程里 {{ask:问题}} 的填写：按字段名存一条，value 为空表示清空。
+export async function saveFieldAnswer(db, user, stageId, fieldName, value) {
+  const id = requireUser(user)
+  await readableStage(db, user, stageId)
+  const name = field(fieldName, '提问项', 60)
+  if (/[\n{}|]/.test(name)) fail(400, '提问项名称无效。')
+  const text = field(value ?? '', '填写内容', 2000, false)
+  if (!text) {
+    await statement(db, 'DELETE FROM stage_answers WHERE stage_id = ? AND user_id = ? AND field = ?',
+      stageId, id, name).run()
+    return { field: name, value: '' }
+  }
+  await statement(db, `
+    INSERT INTO stage_answers (stage_id, user_id, field, value)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT (stage_id, user_id, field) DO UPDATE
+    SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+  `, stageId, id, name, text).run()
+  return { field: name, value: text }
 }
 
 export async function joinCourse(db, user, courseId) {

@@ -4,7 +4,7 @@ import { createViewCache } from './view-cache.js'
 import { createCourseAutosave } from './course-autosave.js'
 import { courseHistory, courseSharingForm, courseVersionPreview, editorChoices } from './collaboration.js'
 import { wishBoard, wishCoursePicker, wishCourses, wishDiscussion, wishForm, wishHeading, wishPage, wishPath } from './wishes.js'
-import { hasSubmissionMarker, submissionKinds, submissionMarker } from './tutorial.js'
+import { askMarker, hasSubmissionMarker, submissionKinds, submissionMarker } from './tutorial.js'
 import {
   button, card, categories, courseEditor, coursePage, coursePath, esc, hero, key, link, note, outline,
   pickedStages, prerequisiteEditor, progress, stageEditor, stagePage, stagePath, stageStats, submission, visibility,
@@ -302,7 +302,7 @@ function paintView({ profile, view }, path) {
       if (view.course && !views.read(coursePath(view.course.id))) {
         cachePage(coursePath(view.course.id), { type: 'course', course: view.course })
       }
-      main.innerHTML = stagePage(view.stage, view.course, view.course?.stages.find(item => item.id === view.stage.id))
+      main.innerHTML = stagePage(view.stage, view.course, view.course?.stages.find(item => item.id === view.stage.id), Boolean(state.user))
       break
     case 'admin':
       state.current = { admin: view.admin }
@@ -383,6 +383,43 @@ async function navigate(path = location.pathname, push = false, focus = false) {
     clearTimeout(showProgress)
     if (version === navigation) navigationProgress.hidden = true
   }
+}
+
+
+// 教程里的提问项：输入后短暂延迟自动保存，失焦时立即保存。
+const askTimers = new WeakMap()
+
+function askValue(box) {
+  if (box.dataset.kind === 'choice') {
+    const select = box.querySelector('[data-ask-select]')
+    const custom = box.querySelector('[data-ask-custom]')
+    const others = select.value === '其他'
+    custom.hidden = !others
+    return others ? custom.value.trim() : select.value
+  }
+  return box.querySelector('[data-ask-text]').value
+}
+
+function scheduleAskSave(box) {
+  const stage = state.current?.stage
+  if (!stage) return
+  const value = askValue(box)
+  box.classList.toggle('filled', Boolean(value))
+  clearTimeout(askTimers.get(box))
+  askTimers.set(box, setTimeout(async () => {
+    if (!requireLogin()) return
+    try {
+      const saved = await api('stages/' + key(stage.id) + '/field', { method: 'PUT', body: { field: box.dataset.field, value } })
+      const answers = stage.answers ?? (stage.answers = [])
+      const index = answers.findIndex(item => item.field === saved.field)
+      if (saved.value) {
+        if (index >= 0) answers[index] = { ...answers[index], value: saved.value }
+        else answers.push(saved)
+      } else if (index >= 0) answers.splice(index, 1)
+    } catch (error) {
+      announce(error.message, true)
+    }
+  }, 700))
 }
 
 function paintPicked() {
@@ -870,6 +907,26 @@ async function handleAction(control) {
       queueCourseDraft(form)
       break
     }
+    case 'insert-ask': {
+      const form = control.form
+      const tutorial = form?.elements?.tutorial
+      if (!tutorial) break
+      const name = form.querySelector('[data-ask-question]').value.trim()
+      if (!name) { announce('先写清要问什么。', true); break }
+      const options = form.querySelector('[data-ask-options]').value.split(/[,，]/)
+        .map(value => value.trim()).filter(Boolean).slice(0, 12)
+      const marker = `\n\n${askMarker(name, options)}\n\n`
+      if (tutorial.value.length + marker.length > tutorial.maxLength) {
+        announce('教程已接近长度上限，请缩短内容后再插入。', true)
+        break
+      }
+      const position = tutorial.selectionEnd
+      tutorial.setRangeText(marker, position, position, 'end')
+      tutorial.focus()
+      queueCourseDraft(form)
+      announce('已插入提问，学习者可以在对应步骤直接填写。')
+      break
+    }
     case 'pick-stage': chooseStageDialog(); break
     case 'pick-deps': requiresDialog(id); break
     case 'attach-stage':
@@ -1147,6 +1204,8 @@ document.addEventListener('input', event => {
       option.hidden = !option.textContent.toLowerCase().includes(input.value.trim().toLowerCase())
     }
   }
+  const askBox = input.closest?.('[data-ask-field]')
+  if (askBox) scheduleAskSave(askBox)
   if (input.matches('input[name="methods"]') && input.form?.querySelector('input[name="required"]')) {
     const toggle = input.form.querySelector(`input[name="required"][value="${CSS.escape(input.value)}"]`)
     if (toggle) {

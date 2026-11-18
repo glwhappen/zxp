@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { hasSubmissionMarker, layoutTutorial } from '../src/client/tutorial.js'
+import { hasAskMarker, hasSubmissionMarker, layoutTutorial } from '../src/client/tutorial.js'
 
 test('legacy tutorials place submissions between their existing steps', () => {
   const markdown = '## 获取密钥\n\n记录模型名称。\n\n## 配置客户端\n\n填写配置。\n\n## 验证连接\n\n检查模型的回复。'
@@ -32,4 +32,21 @@ test('inline markers retain author order and ignore fenced or duplicate markers'
   assert.deepEqual(remaining, ['file'])
   assert.equal(hasSubmissionMarker('```md\n{{submit:answer}}\n```', 'answer'), false)
   assert.equal(hasSubmissionMarker(markdown, 'answer'), true)
+})
+
+test('ask markers render in place with their options', () => {
+  const markdown = [
+    '## 第一步',
+    '{{ask:你准备做哪一类？|模板,教案,表格}}',
+    '{{ask:补充一句}}',
+    '{{submit:answer}}',
+  ].join('\n\n')
+  const { blocks, remaining } = layoutTutorial(markdown, ['answer'])
+  assert.match(blocks[0].html, /第一步/)
+  assert.deepEqual(blocks[1].field, { name: '你准备做哪一类？', options: ['模板', '教案', '表格'] })
+  assert.deepEqual(blocks[2].field, { name: '补充一句', options: [] })
+  assert.equal(blocks[3].kind, 'answer')
+  assert.deepEqual(remaining, [])
+  assert.equal(hasAskMarker(markdown, '补充一句'), true)
+  assert.equal(hasAskMarker(markdown, '没写过的项'), false)
 })
