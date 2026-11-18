@@ -55,12 +55,16 @@ const courses = [
   ['ai-writing', '用 AI 搭建写作流程', '把写作拆成可以反复练习的步骤，从提纲走到第一轮修订。', '效率工具', 'mint', ['writing-plan', 'writing-review']],
 ]
 
+const seeded = new WeakSet()
+
 export async function seedExamples(db) {
+  if (seeded.has(db)) return
   const author = await statement(db, 'SELECT name FROM users WHERE id = ?', AUTHOR).first()
   if (author) {
     if (author.name !== AUTHOR_NAME) {
       await statement(db, 'UPDATE users SET name = ? WHERE id = ?', AUTHOR_NAME, AUTHOR).run()
     }
+    seeded.add(db)
     return
   }
   const queries = [statement(db, 'INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)', AUTHOR, AUTHOR_NAME)]
@@ -79,4 +83,5 @@ export async function seedExamples(db) {
       'INSERT OR IGNORE INTO course_stages VALUES (?, ?, ?)', id, stageId, position)))
   }
   await db.batch(queries)
+  seeded.add(db)
 }

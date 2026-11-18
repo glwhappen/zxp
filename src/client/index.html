@@ -14,10 +14,13 @@
     <aside class="sidebar" id="sidebar"></aside>
     <div class="main-shell">
       <header class="topbar" id="topbar"></header>
-      <main id="main" tabindex="-1"><p class="loading">正在加载课程…</p></main>
+      <main id="main" tabindex="-1">
+        <div class="initial-skeleton" role="status" aria-label="正在打开知行谱"><span></span><span></span><span></span></div>
+      </main>
     </div>
   </div>
   <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
   <div id="toast" role="status" aria-live="polite"></div>
+  <div id="navigation-progress" role="status" aria-label="正在切换页面" hidden></div>
 </body>
 </html>

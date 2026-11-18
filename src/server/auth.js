@@ -40,6 +40,8 @@ export function authCookie(request, name, value, maxAge, path = '/') {
   return `${name}=${value}; Path=${path}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`
 }
 
+const provisionedAccounts = new WeakMap()
+
 async function sitesUser(request, env) {
   const id = request.headers.get('oai-authenticated-user-id')
   if (!id) return null
@@ -51,7 +53,13 @@ async function sitesUser(request, env) {
   }
   const isAdmin = Boolean(email && email.toLowerCase() === env.ZXP_ADMIN_CHATGPT_EMAIL?.trim().toLowerCase())
   const user = { id: 'sites:' + id, name, provider: 'chatgpt', isAdmin }
-  await statement(env.DB, 'INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)', user.id, user.name).run()
+  let known = provisionedAccounts.get(env.DB)
+  if (!known) provisionedAccounts.set(env.DB, known = new Set())
+  if (!known.has(user.id)) {
+    await statement(env.DB, 'INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)', user.id, user.name).run()
+    if (known.size >= 128) known.delete(known.values().next().value)
+    known.add(user.id)
+  }
   return user
 }
 

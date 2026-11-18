@@ -220,6 +220,29 @@ test('MCP creates courses with a revocable user token', async () => {
   await rpc('tools/call', { name: 'course_list' }, token, 401)
 })
 
+test('navigation resolves profile and course-stage data together without exposing other records', async () => {
+  const cookie = await register('viewreader')
+  const view = async (path, owner) => data('/api/view?path=' + encodeURIComponent(path), { cookie: owner })
+  const result = await view('/course/ai-image/stage/api-setup', cookie)
+  assert.equal(result.profile.user.name, 'viewreader')
+  assert.equal(result.view.course.id, 'ai-image')
+  assert.equal(result.view.stage.id, 'api-setup')
+  const foreign = await view('/course/web-basics/stage/api-setup', cookie)
+  assert.equal(foreign.view.status, 404)
+  assert.equal(foreign.view.stage, undefined)
+  const locked = await data('/api/courses', {
+    method: 'POST', cookie, json: { title: '仅作者可见', visibility: 'private' },
+  }, 201)
+  const blocked = await view('/course/' + locked.id)
+  assert.equal(blocked.view.status, 404)
+  assert.equal(blocked.view.course, undefined)
+  const html = await request('/')
+  const script = (await html.text()).match(/src="(\/assets\/app\.[a-f0-9]+\.js)"/)[1]
+  const asset = await request(script)
+  assert.match(asset.headers.get('Cache-Control'), /immutable/)
+  assert.equal((await request('/api/view?path=%2F')).headers.get('Cache-Control'), 'no-store')
+})
+
 async function oidcFlow({ badSignature = false, badNonce = false } = {}) {
   const start = await request('/api/auth/oidc/start?return_to=%2Fadmin', { redirect: 'manual' })
   assert.equal(start.status, 303, await start.text())

@@ -1,5 +1,8 @@
 import { build } from 'esbuild'
-import { copyFile, mkdir } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { copyFile, mkdir, readFile } from 'node:fs/promises'
+
+const digest = value => createHash('sha256').update(value).digest('hex').slice(0, 16)
 
 export async function buildSite({ sites = false, outfile = 'dist/server/index.js' } = {}) {
   const client = await build({
@@ -16,7 +19,11 @@ export async function buildSite({ sites = false, outfile = 'dist/server/index.js
     format: 'esm',
     target: 'es2022',
     outfile,
-    define: { SITES_HOSTED: JSON.stringify(sites) },
+    define: {
+      SITES_HOSTED: JSON.stringify(sites),
+      CLIENT_DIGEST: JSON.stringify(digest(client.outputFiles[0].contents)),
+      CSS_DIGEST: JSON.stringify(digest(await readFile('src/client/style.css'))),
+    },
     loader: { '.html': 'text', '.css': 'text' },
     plugins: [{
       name: 'client-bundle',
