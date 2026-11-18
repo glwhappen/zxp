@@ -200,7 +200,9 @@ code { background: #f2edf8; border-radius: 4px; padding: 1px 4px; overflow-wrap:
 .lesson-finish { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .lesson-finish h2 { font-size: 16px; display: flex; align-items: center; gap: 7px; }
 .lesson-finish .submit-hint { margin-top: 4px; }
+.learning-layout > .notes-panel { grid-column: 1 / -1; }
 .notes-panel { display: grid; gap: 13px; }
+.notes-panel .note-body, .notes-panel .note-form textarea { max-width: 860px; }
 .note-form { display: grid; gap: 8px; }
 .note-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .note-actions select { width: auto; max-width: 100%; }

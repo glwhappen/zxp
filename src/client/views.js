@@ -279,7 +279,6 @@ export function stagePage(stage, course, entry, signedIn) {
         <p>先学会${waiting.map(title => `「${esc(title)}」`).join('、')}，再回到这里继续。</p>
         ${link(coursePath(course.id), '返回课程关卡', 'btn primary', 'layers')}
       </section>
-      ${notesPanel(stage.notes ?? [], Boolean(stage.noteCanWrite))}
     </article>` : `<article class="lesson">
         <header class="lesson-header">
           <div class="lesson-kicker">${icon('layers', 17)} ${course ? `关卡 ${number} / ${course.stageCount}` : '独立关卡'}</div>
@@ -289,12 +288,12 @@ export function stagePage(stage, course, entry, signedIn) {
         </header>
         <section class="task-box"><h2>${icon('target', 20)} 学习任务</h2><p>${esc(stage.task)}</p></section>
         ${tutorialPanel(stage, signedIn)}
-        ${notesPanel(stage.notes ?? [], Boolean(stage.noteCanWrite))}
       </article>`
   return `<p class="breadcrumb">${course ? link(coursePath(course.id), esc(course.title), 'back', 'left') : link('/stages', '我的关卡', 'back', 'left')}</p>
     <div class="learning-layout ${course ? '' : 'standalone'}">
       ${lesson}
       ${course ? `<aside class="lesson-outline"><h2>本课关卡</h2><div data-outline>${progress(course)}${outline(course, stage.id)}</div></aside>` : ''}
+      ${notesPanel(stage.notes ?? [], Boolean(stage.noteCanWrite))}
     </div>`
 }
 
