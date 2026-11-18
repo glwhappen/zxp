@@ -47,8 +47,9 @@ function showDialog(title, body, wide = false) {
 
 function login(mode = 'login') {
   if (state.hosted) {
+    const returnTo = /^\/(?!\/)/.test(location.pathname) ? location.pathname : '/'
     showDialog('登录技能工坊', `<p>使用 ChatGPT 账号保存你的学习进度、提交作业和创建课程。</p>
-      <a class="btn primary" href="/signin-with-chatgpt?returnTo=${key(location.pathname)}" target="_top">使用 ChatGPT 登录</a>`)
+      <a class="btn primary" href="/signin-with-chatgpt?return_to=${key(returnTo)}" target="_top">使用 ChatGPT 登录</a>`)
     return
   }
   const register = mode === 'register'
@@ -71,7 +72,7 @@ function requireLogin() {
 function account() {
   if (!requireLogin()) return
   showDialog('我的账号', `<p class="account-name"><span class="avatar">${esc(state.user.name.slice(0, 1))}</span> ${esc(state.user.name)}</p>
-    ${state.hosted ? '<a class="btn" href="/signout-with-chatgpt?returnTo=%2F" target="_top">退出登录</a>'
+    ${state.hosted ? '<a class="btn" href="/signout-with-chatgpt?return_to=%2F" target="_top">退出登录</a>'
       : button('logout', '退出登录')}`)
 }
 
