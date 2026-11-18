@@ -1,7 +1,9 @@
 import { choice, fail, field, json, objectBody, requireUser, rows, statement } from './core.js'
 import { commitCourse, editableCourse, expectEditor, expectRevision, guardCourse, sharedCourse } from './course-access.js'
 import { checkpoint } from './course-history.js'
-import { courseAtRevision, courseDetail, readableStage, stageDetail, stageInput } from './learning.js'
+import {
+  assertSubmissionMarkers, courseAtRevision, courseDetail, readableStage, stageDetail, stageInput,
+} from './learning.js'
 import { insertPrerequisites } from './prerequisites.js'
 
 export const editModes = ['owner', 'shared', 'public']
@@ -132,6 +134,7 @@ export async function saveCourseLesson(db, user, id, stageId, input) {
   const task = field(input.task, '学习任务', 5000)
   const tutorial = field(input.tutorial ?? '', '教程', 35_000, false)
   const changed = title !== stage.title || task !== stage.task || tutorial !== stage.tutorial
+  if (changed) assertSubmissionMarkers(tutorial, stage.methods)
   if (changed || input.checkpoint) {
     const queries = [guardCourse(db, id, user.id, revision, { advance: changed })]
     if (changed) {

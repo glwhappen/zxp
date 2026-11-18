@@ -65,6 +65,12 @@ const courses = [
 
 const seeded = new WeakSet()
 
+// 开启的提交方式必须在教程里占位，示例课程统一放在教程末尾。
+const withSubmissions = (tutorial, methods) => {
+  const markers = methods.filter(method => method !== 'learned').map(method => `{{submit:${method}}}`)
+  return markers.length ? `${tutorial.trimEnd()}\n\n${markers.join('\n\n')}\n` : tutorial
+}
+
 export async function seedExamples(db) {
   if (seeded.has(db)) return
   const author = await statement(db, 'SELECT name FROM users WHERE id = ?', AUTHOR).first()
@@ -80,7 +86,7 @@ export async function seedExamples(db) {
     queries.push(statement(db, `
       INSERT OR IGNORE INTO stages (id, owner_id, title, task, tutorial, methods, required, visibility)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'public')
-    `, id, AUTHOR, title, task, tutorial, JSON.stringify(methods), JSON.stringify(required)))
+    `, id, AUTHOR, title, task, withSubmissions(tutorial, methods), JSON.stringify(methods), JSON.stringify(required)))
   }
   for (const [id, title, description, category, theme, stageIds, requires] of courses) {
     queries.push(statement(db, `

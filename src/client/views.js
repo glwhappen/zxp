@@ -207,7 +207,7 @@ function tutorialPanel(stage, signedIn) {
       ${kinds.map(kind => submissionSlot(stage, kind)).join('')}</section>` : ''
   }
 
-  const { blocks, remaining } = layoutTutorial(stage.tutorial, kinds)
+  const { blocks } = layoutTutorial(stage.tutorial, kinds)
   const content = blocks.map(block => block.kind ? submissionSlot(stage, block.kind)
     : block.field ? askSlot(stage, block.field, signedIn) : `<div class="markdown">${DOMPurify.sanitize(block.html, {
     USE_PROFILES: { html: true },
@@ -215,11 +215,10 @@ function tutorialPanel(stage, signedIn) {
     FORBID_ATTR: ['style', 'id', 'class'],
     ALLOW_DATA_ATTR: false,
   })}</div>`).join('')
+  // 提交框只出现在作者手动占位的位置；没写 {{submit:...}} 就不显示任何提交框。
   return `<section class="lesson-panel lesson-tutorial"><h2>${icon('book', 20)} 教程</h2>
-    ${kinds.length ? `<p class="subtle submission-intro">${blocks.some(block => block.kind)
-      ? '做到对应步骤即可提交，也可以之后回来修改。' : '看完教程后在下面提交作业，也可以之后回来修改。'}</p>` : ''}
+    ${blocks.some(block => block.kind) ? '<p class="subtle submission-intro">看到提交框就可以填写，也可以之后回来修改。</p>' : ''}
     ${content}
-    ${remaining.length ? `<h3 class="remaining-heading">交作业</h3>${remaining.map(kind => submissionSlot(stage, kind)).join('')}` : ''}
   </section>`
     + (kinds.length ? `<section class="lesson-panel lesson-finish">
       <div><h2>${icon('check', 20)} 学完这一关了吗？</h2>

@@ -2,6 +2,7 @@ import {
   enabledMethods, KINDS, kindLabels, METHODS, missingRequired, parseList, requiredMethods,
 } from '../shared.js'
 import { choice, fail, field, requireUser, rows, statement } from './core.js'
+import { hasSubmissionMarker } from '../client/tutorial.js'
 import { listNotes } from './notes.js'
 import { ADMIN_LABELS, COURSE_LABELS, courseLabelKeys } from '../shared.js'
 import { commitCourse, editableCourse, expectEditor, expectRevision, guardCourse, publicCourse, readableCourse, sharedCourse } from './course-access.js'
@@ -355,6 +356,15 @@ export async function saveCourse(db, user, data, courseId) {
   return courseAtRevision(db, user, id, current ? revision + Number(changed) : 0)
 }
 
+
+// 提交框只出现在作者手动占位的地方：开启了提交方式就必须在教程里写 {{submit:kind}}。
+export function assertSubmissionMarkers(tutorial, methods) {
+  for (const kind of methods) {
+    if (kind === 'learned' || hasSubmissionMarker(tutorial, kind)) continue
+    fail(400, `教程里没有「${kindLabels([kind])}」的提交位置：请在需要的地方单独一行插入 {{submit:${kind}}}，或关闭这个提交方式。`)
+  }
+}
+
 export function stageInput(data) {
   const title = field(data.title, '关卡名称', 100)
   const task = field(data.task, '学习任务', 5000)
@@ -368,6 +378,7 @@ export function stageInput(data) {
       || required.some(kind => !KINDS.includes(kind))) fail(400, '请选择有效且不重复的必填提交方式。')
   if (required.some(kind => !selected.includes(kind))) fail(400, '必填项需要同时开启对应的提交方式。')
   const mustSubmit = KINDS.filter(kind => required.includes(kind))
+  assertSubmissionMarkers(tutorial, selected)
   const visibility = choice(data.visibility ?? 'private', VISIBILITY, '关卡可见性')
   return { title, task, tutorial, methods: selected, required: mustSubmit, visibility }
 }

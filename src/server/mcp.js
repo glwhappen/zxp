@@ -41,7 +41,7 @@ const course = {
 const stage = {
   title: string,
   task: string,
-  tutorial: { ...string, description: 'Markdown 教程。将 {{submit:answer}}、{{submit:screenshot}} 或 {{submit:file}} 放在独立段落中安排提交框；{{ask:问题}} 或 {{ask:问题|选项1,选项2}} 在步骤里放一个小提问。' },
+  tutorial: { ...string, description: 'Markdown 教程。开启的每种提交方式都必须在独立段落里写 {{submit:answer}}、{{submit:screenshot}} 或 {{submit:file}} 占位，否则保存失败；{{ask:问题}} 或 {{ask:问题|选项1,选项2}} 在步骤里放一个小提问。' },
   methods: array(enumeration(METHODS)),
   required: { ...array(enumeration(KINDS)), description: '必填的提交方式，必须是 methods 中已开启的项。必填未提交时无法标记学会。' },
   visibility,
