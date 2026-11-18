@@ -4,7 +4,7 @@
   <p><strong>用可复用的关卡编排实战课程</strong></p>
   <p>编写教程、穿插练习，在每一步提交答案、截图或作品。</p>
   <p>
-    <a href="https://skill-workshop-learning.mixedbobcat1.chatgpt.site">私人试用</a>
+    <a href="https://zxp.hsfp.cn">访问在线网站</a>
     · <a href="#快速开始">快速开始</a>
     · <a href="#创建课程">创建课程</a>
     · <a href="#账号与管理">账号与管理</a>
