@@ -131,6 +131,16 @@ h2 { font-size: 20px; font-weight: 790; letter-spacing: -.018em; }
 .intro-main p { color: #5d526b; overflow-wrap: anywhere; white-space: pre-wrap; }
 .intro-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 16px; color: #685b79; font-size: 13px; }
 .intro-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.label { display: inline-flex; align-items: center; border-radius: 20px; padding: 2px 8px; font-size: 11px; font-weight: 650; white-space: nowrap; border: 1px solid transparent; }
+.label-draft { background: #fff4e5; color: #9a5a12; border-color: #f4ddba; }
+.label-done { background: #e7f6ee; color: #23674a; border-color: #cfe9db; }
+.label-co-create { background: #eaf2ff; color: #2f5aa8; border-color: #d3e2fa; }
+.label-featured { background: #fff2cf; color: #8a5a00; border-color: #f0d99b; }
+.label-picker { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; margin: 4px 0 8px; }
+.label-picker > .subtle { font-weight: 650; }
+.label-choice { display: flex !important; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: #473a58; }
+.admin-labels { display: flex; flex-wrap: wrap; gap: 4px; }
+.admin-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .visibility { display: inline-flex; align-items: center; gap: 4px; color: #655d75; background: #fff9; border: 1px solid #ddd6e7; font-size: 11px; font-weight: 600; border-radius: 20px; padding: 2px 7px; white-space: nowrap; }
 .outline-card, .lesson-panel, .lesson-header, .lesson-outline, .form-panel { border: 1px solid var(--line); border-radius: var(--radius); background: white; padding: 22px; }
 .outline-card { margin: 19px 0; }

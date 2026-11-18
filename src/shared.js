@@ -31,3 +31,18 @@ export function missingRequired(required, submitted) {
 export function kindLabels(kinds) {
   return kinds.map(kind => LABELS[kind] ?? kind).join('、')
 }
+
+// 课程标签：作者能设前三个，精品只留给管理员。
+export const COURSE_LABELS = {
+  draft: { name: '编写中', hint: '还在写，内容会继续调整' },
+  done: { name: '完结', hint: '内容已经完整' },
+  'co-create': { name: '期待共创', hint: '欢迎一起补关卡' },
+  featured: { name: '精品', hint: '管理员推荐', adminOnly: true },
+}
+export const AUTHOR_LABELS = ['draft', 'done', 'co-create']
+export const ADMIN_LABELS = ['featured']
+
+export function courseLabelKeys(raw) {
+  const list = parseList(raw)
+  return Object.keys(COURSE_LABELS).filter(key => list.includes(key))
+}

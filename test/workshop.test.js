@@ -277,6 +277,26 @@ test('required submissions gate the learned state everywhere', async () => {
   } }, 400)
 })
 
+test('course labels are author-editable except the featured badge', async () => {
+  const owner = await register('labelowner')
+  const created = await data('/api/courses', { method: 'POST', cookie: owner, json: {
+    title: '标签课程', visibility: 'public', labels: ['draft', 'co-create'], stageIds: [],
+  } }, 201)
+  assert.deepEqual(created.labels, ['draft', 'co-create'])
+  assert.deepEqual((await data('/api/courses', {})).find(course => course.id === created.id).labels, ['draft', 'co-create'])
+  const updated = await data('/api/courses/' + created.id, { method: 'PUT', cookie: owner, json: {
+    title: '标签课程', visibility: 'public', labels: ['done'], stageIds: [],
+  } })
+  assert.deepEqual(updated.labels, ['done'])
+  const forged = await data('/api/courses/' + created.id, { method: 'PUT', cookie: owner, json: {
+    title: '标签课程', visibility: 'public', labels: ['done', 'featured'], stageIds: [],
+  } })
+  assert.deepEqual(forged.labels, ['done'])
+  await data('/api/courses/' + created.id, { method: 'PUT', cookie: owner, json: {
+    title: '标签课程', visibility: 'public', labels: ['unknown'], stageIds: [],
+  } }, 400)
+})
+
 test('stage notes can be public discussions or private notes', async () => {
   const owner = await register('noteowner')
   const reader = await register('notereader')
@@ -473,6 +493,7 @@ test('invited editors can collaborate on private courses and restore a complete 
   await data(scoped, { cookie: reader }, 404)
   await data(path + '/sharing', { cookie: editor }, 403)
   await update(editor, { title: initial.title, visibility: 'public', expectedRevision: shared.revision }, 403)
+  await update(editor, { title: initial.title, labels: ['draft'], expectedRevision: shared.revision }, 403)
   await update(editor, { title: '错账号的草稿', expectedEditorId: 'other', expectedRevision: shared.revision }, 409)
 
   await update(editor, { title: initial.title, stageIds: [privateStage.id, publicStage.id, 'api-setup'], expectedRevision: shared.revision }, 403)
@@ -676,6 +697,24 @@ test('OIDC validates signed identity and only admins can manage login methods an
   await data('/api/courses/ai-image', {}, 404)
   await data('/api/admin/courses/ai-image', { method: 'PUT', cookie, json: { hidden: false } })
   await data('/api/courses/ai-image', {})
+
+  const featured = await data('/api/admin/courses/ai-image', { method: 'PUT', cookie, json: { featured: true } })
+  assert.deepEqual(featured.labels, ['featured'])
+  assert.deepEqual((await data('/api/courses/ai-image', {})).labels, ['featured'])
+  const adminCourse = await data('/api/courses', { method: 'POST', cookie, json: {
+    title: '管理员的课', visibility: 'public', labels: ['done'], stageIds: [],
+  } }, 201)
+  await data('/api/admin/courses/' + adminCourse.id, { method: 'PUT', cookie, json: { featured: true } })
+  const kept = await data('/api/courses/' + adminCourse.id, { method: 'PUT', cookie, json: {
+    title: '管理员的课', visibility: 'public', stageIds: [],
+  } })
+  assert.deepEqual(kept.labels, ['done', 'featured'])
+  const dropped = await data('/api/courses/' + adminCourse.id, { method: 'PUT', cookie, json: {
+    title: '管理员的课', visibility: 'public', labels: ['done'], stageIds: [],
+  } })
+  assert.deepEqual(dropped.labels, ['done'])
+  await data('/api/admin/courses/ai-image', { method: 'PUT', cookie, json: { featured: false } })
+  assert.deepEqual((await data('/api/courses/ai-image', {})).labels, [])
 
   await data('/api/admin/login-methods', {
     method: 'PUT', cookie, json: { chatgpt: false, password: true, oidc: false },

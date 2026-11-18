@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify'
-import { kindLabels, LABELS } from '../shared.js'
+import { COURSE_LABELS, kindLabels, LABELS } from '../shared.js'
 import { icon } from './icons.js'
 import { layoutTutorial, submissionKinds } from './tutorial.js'
 
@@ -31,6 +31,14 @@ function topicIcon(course) {
   return ({ 'AI 创作': 'image', '编程开发': 'code', '效率工具': 'pen', '产品设计': 'target' })[course.category] ?? 'layers'
 }
 
+// 课程标签徽标：编写中 / 完结 / 期待共创 / 精品（管理员）
+export function labelBadges(labels = []) {
+  return (labels ?? []).map(key => {
+    const meta = COURSE_LABELS[key]
+    return meta ? `<span class="label label-${key}">${esc(meta.name)}</span>` : ''
+  }).join('')
+}
+
 export function visibility(value) {
   return `<span class="visibility">${icon(value === 'public' ? 'globe' : 'lock', 14)}${value === 'public' ? '公开' : '私有'}</span>`
 }
@@ -44,7 +52,7 @@ export function card(course, scope) {
   return `<a class="course-card" href="${coursePath(course.id)}" data-link>
     <div class="card-cover theme-${theme(course)}"><span class="cover-icon">${icon(topicIcon(course), 28)}</span><span class="cover-orbit"></span></div>
     <div class="card-content">
-      <div class="card-tag">${esc(course.category)}${scope === 'owned' ? visibility(course.visibility) : ''}${scope === 'owned' && !course.owned ? '<span class="visibility">协作课程</span>' : ''}${course.moderated_at ? '<span class="visibility">已下架</span>' : ''}</div>
+      <div class="card-tag">${esc(course.category)}${labelBadges(course.labels)}${scope === 'owned' ? visibility(course.visibility) : ''}${scope === 'owned' && !course.owned ? '<span class="visibility">协作课程</span>' : ''}${course.moderated_at ? '<span class="visibility">已下架</span>' : ''}</div>
       <h3>${esc(course.title)}</h3>
       <p>${esc(course.description)}</p>
       ${scope === 'joined' ? progress(course) : ''}
@@ -76,7 +84,7 @@ export function coursePage(course, user) {
     <section class="course-intro theme-${theme(course)}">
       <div class="cover-icon">${icon(topicIcon(course), 30)}</div>
       <div class="intro-main">
-        <div class="card-tag">${esc(course.category)}${visibility(course.visibility)}${course.moderated_at ? '<span class="visibility">已下架</span>' : ''}</div>
+        <div class="card-tag">${esc(course.category)}${labelBadges(course.labels)}${visibility(course.visibility)}${course.moderated_at ? '<span class="visibility">已下架</span>' : ''}</div>
         <h1>${esc(course.title)}</h1><p>${esc(course.description)}</p>
         <div class="intro-meta"><span>${icon('user', 16)}${esc(course.author)}</span><span>${icon('layers', 16)}${course.stageCount} 个关卡</span><span>${icon('users', 16)}${course.learnerCount} 人学习</span></div>
       </div>
@@ -352,6 +360,14 @@ export function courseEditor(editor) {
         <label>主题色<select name="theme">${options(Object.entries(themes), item.theme ?? 'violet')}</select></label>
         ${!item.id || item.owned ? `<label>可见性<select name="visibility">${visOptions(item.visibility)}</select></label>` : ''}
       </div>
+      ${!item.id || item.owned ? `<div class="label-picker" role="group" aria-label="课程标签">
+        <span class="subtle">标签</span>
+        ${[['draft', '编写中'], ['done', '完结']].map(([value, name]) => `<label class="label-choice">
+          <input type="radio" name="progress-label" value="${value}" ${(item.labels ?? []).includes(value) ? 'checked' : ''}> ${name}</label>`).join('')}
+        <label class="label-choice"><input type="radio" name="progress-label" value="" ${['draft', 'done'].some(value => (item.labels ?? []).includes(value)) ? '' : 'checked'}> 不标注进度</label>
+        <label class="label-choice"><input type="checkbox" name="co-create" ${(item.labels ?? []).includes('co-create') ? 'checked' : ''}> 期待共创</label>
+        ${editor.isAdmin ? `<label class="label-choice"><input type="checkbox" name="featured" ${(item.labels ?? []).includes('featured') ? 'checked' : ''}> 精品（管理员）</label>` : ''}
+      </div>` : ''}
       ${!item.id || item.owned ? `<div class="editor-divider"></div><h2>前置课程</h2>
         <p class="subtle">必修课程完成后解锁本课。建议课程可以跳过。公开课程使用公开的前置课程。</p>
         <div data-prerequisite-editor>${prerequisiteEditor(editor)}</div>` : ''}

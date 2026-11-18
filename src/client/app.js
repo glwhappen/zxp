@@ -461,9 +461,17 @@ function requiresDialog(stageId) {
 }
 
 function courseDraft(editor, form) {
-  const { title, description, category, theme, visibility } = Object.fromEntries(new FormData(form))
+  const data = Object.fromEntries(new FormData(form))
+  const { title, description, category, theme, visibility } = data
+  const progress = typeof data['progress-label'] === 'string' ? data['progress-label'] : ''
+  const labels = [
+    ...(progress ? [progress] : []),
+    ...(data['co-create'] ? ['co-create'] : []),
+    ...(data.featured ? ['featured'] : []),
+  ]
   return {
-    title, description, category, theme, visibility: visibility ?? editor.course?.visibility, stageIds: [...editor.ids],
+    title, description, category, theme, visibility: visibility ?? editor.course?.visibility, labels,
+    stageIds: [...editor.ids],
     requires: Object.fromEntries([...editor.ids].map(id => [id, editor.requires?.[id] ?? []])),
     ...(!editor.course || editor.course.owned
       ? { prerequisites: editor.prerequisites.map(({ courseId, mode }) => ({ courseId, mode })) } : {}),
@@ -494,6 +502,7 @@ function syncCourseEditor(editor, course, stage) {
 function mountCourseEditor(course, available, prerequisiteChoices = []) {
   const editor = {
     course, available, ids: course?.stages.map(stage => stage.id) ?? [], userId: state.user?.id,
+    isAdmin: Boolean(state.user?.isAdmin),
     requires: Object.fromEntries((course?.stages ?? []).map(stage => [stage.id, stage.requires ?? []])),
     newStages: new Map(), prerequisites: course?.prerequisites ?? [], prerequisiteChoices,
   }
@@ -765,6 +774,17 @@ async function handleAction(control) {
       accountChanged()
       await navigate('/', true)
       break
+    case 'admin-featured': {
+      const admin = state.current.admin
+      const featured = control.dataset.featured === 'true'
+      const updated = await api('admin/courses/' + key(id), { method: 'PUT', body: { featured } })
+      views.invalidate()
+      if (state.current?.admin !== admin) break
+      admin.courses.find(course => course.id === id).labels = updated.labels
+      main.innerHTML = adminPage(admin)
+      announce(featured ? '已设为精品。' : '已取消精品。')
+      break
+    }
     case 'admin-course': {
       const admin = state.current.admin
       const hidden = control.dataset.hidden === 'true'

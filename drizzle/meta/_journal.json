@@ -57,6 +57,13 @@
       "when": 1795067200000,
       "tag": "0007_stage_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1795070800000,
+      "tag": "0008_course_labels",
+      "breakpoints": true
     }
   ]
 }

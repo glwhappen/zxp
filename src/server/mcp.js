@@ -1,4 +1,4 @@
-import { KINDS, METHODS } from '../shared.js'
+import { AUTHOR_LABELS, KINDS, METHODS } from '../shared.js'
 import { checkOrigin, choice, field, json, objectBody, RequestError } from './core.js'
 import {
   CATEGORIES, courseDetail, courseOverview, joinCourse, listCourses, listStages, markLearned,
@@ -36,6 +36,7 @@ const course = {
   }),
   requires: { type: 'object', additionalProperties: array(string),
     description: '关卡依赖：{ 关卡 ID: [前置关卡 ID...] }。前置关卡必须排在当前关卡之前，全部学会后才能打开当前关卡。' },
+  labels: { ...array(enumeration(AUTHOR_LABELS)), description: '课程标签：draft 编写中、done 完结、co-create 期待共创。featured（精品）只能由管理员在后台设置。' },
 }
 const stage = {
   title: string,

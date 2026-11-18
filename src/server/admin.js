@@ -1,3 +1,4 @@
+import { courseLabelKeys } from '../shared.js'
 import { fail, field, json, objectBody, requireUser, rows, statement } from './core.js'
 import { saveLoginSettings } from './login-config.js'
 
@@ -10,14 +11,25 @@ export async function adminApi(request, env, user, settings, url) {
     return json(await saveLoginSettings(env, settings, await objectBody(request, 2000)))
   }
   if (request.method === 'PUT' && resource === 'courses' && id) {
-    const { hidden } = await objectBody(request, 2000)
-    if (typeof hidden !== 'boolean') fail(400, '请选择课程的下架状态。')
+    const body = await objectBody(request, 2000)
+    if (typeof body.hidden !== 'boolean' && typeof body.featured !== 'boolean') {
+      fail(400, '请选择课程的下架状态或精品标签。')
+    }
+    const course = await statement(db, 'SELECT id, labels, moderated_at FROM courses WHERE id = ?', id).first()
+    if (!course) fail(404, '课程不存在。')
+    const hidden = typeof body.hidden === 'boolean' ? body.hidden : Boolean(course.moderated_at)
+    const labels = new Set(courseLabelKeys(course.labels))
+    if (typeof body.featured === 'boolean') {
+      if (body.featured) labels.add('featured')
+      else labels.delete('featured')
+    }
     const updated = await statement(db, `
-      UPDATE courses SET moderated_at = CASE WHEN ? THEN COALESCE(moderated_at, CURRENT_TIMESTAMP) ELSE NULL END
-      WHERE id = ? RETURNING id, moderated_at
-    `, Number(hidden), id).first()
-    if (!updated) fail(404, '课程不存在。')
-    return json(updated)
+      UPDATE courses SET
+        moderated_at = CASE WHEN ? THEN COALESCE(moderated_at, CURRENT_TIMESTAMP) ELSE NULL END,
+        labels = ?
+      WHERE id = ? RETURNING id, moderated_at, labels
+    `, Number(hidden), JSON.stringify([...labels]), id).first()
+    return json({ ...updated, labels: courseLabelKeys(updated.labels) })
   }
   if (request.method !== 'GET' || resource) fail(404, '管理接口不存在。')
   const q = field(url.searchParams.get('q') ?? '', '课程搜索', 100, false)
@@ -28,7 +40,7 @@ export async function adminApi(request, env, user, settings, url) {
         (SELECT COUNT(*) FROM submissions) AS submissions
     `).first(),
     rows(statement(db, `
-      SELECT c.id, c.title, c.visibility, c.moderated_at, u.name AS author
+      SELECT c.id, c.title, c.visibility, c.moderated_at, c.labels, u.name AS author
       FROM courses c JOIN users u ON u.id = c.owner_id
       WHERE instr(lower(c.title), lower(?)) > 0 OR instr(lower(u.name), lower(?)) > 0
       ORDER BY c.updated_at DESC, c.id LIMIT 50
@@ -40,5 +52,6 @@ export async function adminApi(request, env, user, settings, url) {
       WHERE u.id <> 'workshop-examples' ORDER BY u.name, u.id LIMIT 50
     `)),
   ])
-  return json({ counts, courses, users, settings, q })
+  return json({ counts, courses: courses.map(course => ({ ...course, labels: courseLabelKeys(course.labels) })),
+    users, settings, q })
 }

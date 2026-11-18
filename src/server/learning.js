@@ -3,6 +3,7 @@ import {
 } from '../shared.js'
 import { choice, fail, field, requireUser, rows, statement } from './core.js'
 import { listNotes } from './notes.js'
+import { ADMIN_LABELS, COURSE_LABELS, courseLabelKeys } from '../shared.js'
 import { commitCourse, editableCourse, expectEditor, expectRevision, guardCourse, publicCourse, readableCourse, sharedCourse } from './course-access.js'
 import { checkpoint } from './course-history.js'
 import {
@@ -24,6 +25,7 @@ function bools(item) {
 const courseSelect = `
   SELECT c.id, c.title, c.description, c.category, c.theme, c.visibility, u.name AS author,
     c.owner_id = ?1 AS owned, ${editableCourse('?1')} AS canEdit, c.edit_mode, c.revision, c.updated_at, c.moderated_at,
+    c.labels,
     EXISTS(SELECT 1 FROM enrollments e WHERE e.course_id = c.id AND e.user_id = ?1) AS joined,
     (SELECT COUNT(*) FROM course_stages cs WHERE cs.course_id = c.id) AS stageCount,
     (SELECT COUNT(*) FROM course_stages cs JOIN progress p ON p.stage_id = cs.stage_id
@@ -46,7 +48,8 @@ export async function listCourses(db, user, scope = 'public') {
   }
   if (!Object.hasOwn(where, scope)) fail(400, '课程范围无效。')
   const list = await rows(statement(db, courseSelect + ` WHERE ${where[scope]}`, id))
-  return list.map(bools).sort((a, b) => b.updated_at.localeCompare(a.updated_at) || a.id.localeCompare(b.id))
+  return list.map(item => ({ ...bools(item), labels: courseLabelKeys(item.labels) }))
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at) || a.id.localeCompare(b.id))
 }
 
 export async function courseDetail(db, user, courseId) {
@@ -90,7 +93,8 @@ export async function courseDetail(db, user, courseId) {
   const outline = stages.map(stage => ({ ...stage,
     locked: !Boolean(course.canEdit) && !stage.learned
       && stage.requires.some(dependency => !byId.get(dependency)?.learned) }))
-  return { ...bools(course), prerequisites, learningLocked: lockedByPrerequisites(prerequisites), stages: outline }
+  return { ...bools(course), labels: courseLabelKeys(course.labels), prerequisites,
+    learningLocked: lockedByPrerequisites(prerequisites), stages: outline }
 }
 
 export async function courseAtRevision(db, user, id, revision) {
@@ -285,17 +289,27 @@ export async function saveCourse(db, user, data, courseId) {
   const existingRequires = new Map((current?.stages ?? []).map(stage => [stage.id, stage.requires ?? []]))
   const requiresChanged = ids.some(stageId =>
     JSON.stringify(requires.get(stageId) ?? []) !== JSON.stringify(existingRequires.get(stageId) ?? []))
+  // 标签：作者可设 draft/done/co-create，featured 只有管理员能改；保存时保留已有的管理员标签。
+  const requested = Array.isArray(data.labels) ? data.labels : current?.labels ?? []
+  if (requested.some(key => typeof key !== 'string' || !Object.hasOwn(COURSE_LABELS, key))) fail(400, '课程标签无效。')
+  const adminOnly = new Set(ADMIN_LABELS)
+  const mine = requested.filter(key => !adminOnly.has(key))
+  const kept = (current?.labels ?? []).filter(key => adminOnly.has(key))
+  const labels = user?.isAdmin ? requested : Object.keys(COURSE_LABELS).filter(key => mine.includes(key) || kept.includes(key))
   const id = courseId ?? crypto.randomUUID()
   const details = { title, description, category, theme, visibility }
+  const labelsChanged = JSON.stringify(labels) !== JSON.stringify(current?.labels ?? [])
+  if (labelsChanged && current && !current.owned) fail(403, '只有课程作者可以调整课程标签。')
   const reordered = JSON.stringify(ids) !== JSON.stringify(existingIds)
-  const changed = !current || reordered || requirementsChanged || requiresChanged
+  const changed = !current || reordered || requirementsChanged || requiresChanged || labelsChanged
     || Object.entries(details).some(([key, value]) => value !== current[key])
   if (!changed && !data.checkpoint) return current
   const queries = []
   if (current) {
     queries.push(guardCourse(db, id, actor, revision, { advance: changed }))
     if (changed) {
-      const structure = reordered || requirementsChanged || requiresChanged || visibility !== current.visibility
+      const structure = reordered || requirementsChanged || requiresChanged || labelsChanged
+        || visibility !== current.visibility
       queries.push(...checkpoint(db, id, revision, actor, structure ? 'structure' : 'interval', { periodic: !structure }))
       if (reordered) queries.push(statement(db, `
         DELETE FROM course_stages WHERE course_id = ? AND stage_id NOT IN (SELECT value FROM json_each(?))
@@ -303,14 +317,16 @@ export async function saveCourse(db, user, data, courseId) {
       if (requirementsChanged) queries.push(statement(db, 'DELETE FROM course_prerequisites WHERE course_id = ?', id))
       queries.push(statement(db, `
         UPDATE courses SET title = ?1, description = ?2, category = ?3, theme = ?4, visibility = ?5,
+          labels = ?7,
           edit_mode = CASE WHEN edit_mode = 'public' AND ?5 = 'private' THEN 'owner' ELSE edit_mode END,
           updated_at = CURRENT_TIMESTAMP WHERE id = ?6
-      `, title, description, category, theme, visibility, id))
+      `, title, description, category, theme, visibility, id, JSON.stringify(labels)))
     }
   } else {
     queries.push(statement(db, `
-      INSERT INTO courses (title, description, category, theme, visibility, id, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `, title, description, category, theme, visibility, id, actor))
+      INSERT INTO courses (title, description, category, theme, visibility, labels, id, owner_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, title, description, category, theme, visibility, JSON.stringify(labels), id, actor))
   }
   if (requirementsChanged) queries.push(insertPrerequisites(db, id, JSON.stringify(prerequisites)))
   for (const stage of newStages.values()) {
