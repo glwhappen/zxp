@@ -168,7 +168,7 @@ Sites 的私人访问限制在应用登录页面前生效。要让其他人在�
 
 - 更新课程时，先读取记录，再传入完整表单和当前 `revision`（作为 `expectedRevision`）。需要手动存档时传入 `checkpoint: true`。
 - 课程作者通过 `prerequisites` 配置前置课程。每项提供 `courseId`，并将 `mode` 设为 `required` 或 `recommended`。
-- 在 Markdown 教程的独立段落插入 `{{submit:answer}}`、`{{submit:screenshot}}` 或 `{{submit:file}}`，并在 `methods` 中开启对应方式；`{{ask:问题}}` / `{{ask:问题|选项1,选项2}}` 让学习者在步骤里填小答案。
+- 在 Markdown 教程的独立段落插入 `{{submit:answer|这一题要交什么}}`（screenshot/file 同理），并在 `methods` 中开启对应方式；`{{ask:问题}}` / `{{ask:问题|选项1,选项2}}` 让学习者在步骤里填小答案。
 - `stage_create`、`stage_update` 的 `required` 是 `methods` 的子集；`course_create`、`course_update` 的 `requires` 只能指向同一课程中排在更前面的关卡。
 - 上传使用标准 Base64，单文件编码前最多 2 MiB。
 - 支持 `server/discover` 和早期客户端使用的 `initialize`。协议见 [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)。
