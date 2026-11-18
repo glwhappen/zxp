@@ -1224,6 +1224,11 @@ document.addEventListener('input', event => {
   }
 })
 
+// iOS Safari 忽略 user-scalable=no，用 gesture 事件挡住双指缩放。
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
+  document.addEventListener(type, event => event.preventDefault(), { passive: false })
+}
+
 dialog.addEventListener('click', event => {
   if (event.target === dialog) dialog.close()
 })
