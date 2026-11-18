@@ -1,11 +1,19 @@
 import { KINDS, METHODS } from '../shared.js'
 import { checkOrigin, choice, field, json, objectBody, RequestError } from './core.js'
 import {
-  CATEGORIES, courseDetail, joinCourse, listCourses, listStages, markLearned,
-  saveCourse, saveStage, stageDetail, THEMES,
+  CATEGORIES, courseDetail, courseOverview, joinCourse, listCourses, listStages, markLearned,
+  saveCourse, saveStage, studyStageDetail, THEMES,
 } from './learning.js'
 import { submitAnswer, submitFile } from './submissions.js'
 import { identify } from './auth.js'
+import {
+  createWish, linkWishCourse, listWishes, rateWishCourse, replyToWish, setWishStatus, wishDetail, wishReplies,
+} from './wishes.js'
+import {
+  addCourseStage, courseSharing, courseVersions, editModes, inspectCourseVersion,
+  restoreCourseVersion, saveCourseLesson, saveCourseSharing, searchCourseEditors,
+} from './collaboration.js'
+import { prerequisiteModes } from './prerequisites.js'
 
 const version = '2026-07-28'
 const legacy = ['2025-11-25', '2025-06-18', '2025-03-26']
@@ -17,9 +25,15 @@ const boolean = { type: 'boolean' }
 const enumeration = values => ({ type: 'string', enum: values })
 const array = items => ({ type: 'array', items, uniqueItems: true })
 const visibility = enumeration(['public', 'private'])
+const expectedRevision = { type: 'number', minimum: 0 }
+const pageNumber = { type: 'number', minimum: 1 }
 const course = {
   title: string, description: string, category: enumeration(CATEGORIES), theme: enumeration(THEMES),
   visibility, stageIds: array(string),
+  prerequisites: array({
+    type: 'object', properties: { courseId: string, mode: enumeration(prerequisiteModes) },
+    required: ['courseId', 'mode'], additionalProperties: false,
+  }),
   requires: { type: 'object', additionalProperties: array(string),
     description: '关卡依赖：{ 关卡 ID: [前置关卡 ID...] }。前置关卡必须排在当前关卡之前，全部学会后才能打开当前关卡。' },
 }
@@ -44,23 +58,55 @@ function tool(name, description, properties, required, run, readOnlyHint = false
   })
 }
 
-tool('course_list', '列出公开、自己创建或已经加入的课程。', { scope: enumeration(['public', 'owned', 'joined']) }, [],
+tool('course_list', '列出公开、自己创建、可以管理或已经加入的课程。managed 包含指定账号共享的课程。', {
+  scope: enumeration(['public', 'owned', 'managed', 'joined']),
+}, [],
   ({ DB }, user, args) => listCourses(DB, user, args.scope), true)
 tool('course_get', '读取课程详情、关卡顺序和当前用户的学习进度。', { courseId: string }, ['courseId'],
-  ({ DB }, user, args) => courseDetail(DB, user, id(args, 'courseId')), true)
-tool('course_create', '创建课程。stageIds 按顺序引用已有的关卡，requires 配置关卡依赖。默认私有。', course, ['title'],
+  async ({ DB }, user, args) => courseOverview(await courseDetail(DB, user, id(args, 'courseId'))), true)
+tool('course_create', '创建课程。stageIds 只能引用自己的关卡，也可用 newStages 在同一次调用里创建新关卡；prerequisites 是课程前置，requires 是关卡依赖。默认私有。', {
+  ...course,
+  newStages: array({
+    type: 'object', properties: { clientId: string, ...stage }, required: ['clientId', 'title', 'task'],
+    additionalProperties: false,
+  }),
+}, ['title'],
   ({ DB }, user, args) => saveCourse(DB, user, args))
-tool('course_update', '更新自己创建的课程，保留课程 ID。先读取现有字段，再提交完整表单及 stageIds。', { courseId: string, ...course },
+tool('course_update', '更新可编辑课程。先读取完整字段和 revision，可用 checkpoint 保存历史版本。', {
+  courseId: string, ...course, expectedRevision, checkpoint: boolean,
+},
   ['courseId', 'title', 'description', 'category', 'theme', 'visibility', 'stageIds'],
   ({ DB }, user, args) => saveCourse(DB, user, args, id(args, 'courseId')))
 tool('course_join', '将课程加入我的学习。', { courseId: string }, ['courseId'],
   ({ DB }, user, args) => joinCourse(DB, user, id(args, 'courseId')))
-tool('stage_list', '列出你创建的可复用关卡。课程只能引用自己创建的关卡，所以 available 与 owned 等价。', { scope: enumeration(['available', 'owned']) }, [],
+tool('course_sharing_get', '读取课程的编辑权限和指定协作者。仅作者可用。', { courseId: string }, ['courseId'],
+  ({ DB }, user, args) => courseSharing(DB, user, id(args, 'courseId')), true)
+tool('course_sharing_search', '按昵称、用户名或账号 ID 搜索协作者。仅课程作者可用。', { courseId: string, query: string },
+  ['courseId', 'query'], ({ DB }, user, args) => searchCourseEditors(DB, user, id(args, 'courseId'), args.query), true)
+tool('course_sharing_set', '仅作者可设定编辑权限。public 会公开课程并要求所有关卡公开。', {
+  courseId: string, mode: enumeration(editModes), editorIds: array(string), expectedRevision,
+}, ['courseId', 'mode', 'editorIds', 'expectedRevision'], ({ DB }, user, args) => saveCourseSharing(DB, user, id(args, 'courseId'), args))
+tool('course_versions', '列出可访问的课程历史版本。使用 before 读取更早的版本。', { courseId: string, before: pageNumber },
+  ['courseId'], ({ DB }, user, args) => courseVersions(DB, user, id(args, 'courseId'), args.before), true)
+tool('course_version_get', '预览指定历史版本的课程资料和关卡编排。', { courseId: string, versionId: string },
+  ['courseId', 'versionId'], ({ DB }, user, args) => inspectCourseVersion(DB, user, id(args, 'courseId'), id(args, 'versionId')), true)
+tool('course_restore', '将课程资料、关卡编排和讲义恢复到历史版本。恢复前会留档。', {
+  courseId: string, versionId: string, expectedRevision,
+}, ['courseId', 'versionId', 'expectedRevision'],
+({ DB }, user, args) => restoreCourseVersion(DB, user, id(args, 'courseId'), id(args, 'versionId'), args))
+tool('course_lesson_update', '更新本课程里的关卡名称、任务和讲义。', {
+  courseId: string, stageId: string, title: string, task: string, tutorial: stage.tutorial, expectedRevision, checkpoint: boolean,
+}, ['courseId', 'stageId', 'title', 'task', 'tutorial', 'expectedRevision'],
+({ DB }, user, args) => saveCourseLesson(DB, user, id(args, 'courseId'), id(args, 'stageId'), args))
+tool('course_stage_create', '在可编辑课程末尾创建关卡。新关卡使用课程的可见性，可用 required 设定必填提交。', {
+  courseId: string, title: stage.title, task: stage.task, tutorial: stage.tutorial, methods: stage.methods,
+  required: stage.required, expectedRevision,
+}, ['courseId', 'title', 'task', 'expectedRevision'], ({ DB }, user, args) => addCourseStage(DB, user, id(args, 'courseId'), args))
+tool('stage_list', '列出自己创建、可在自己其他课程复用的关卡。', { scope: enumeration(['available', 'owned']) }, [],
   ({ DB }, user, args) => listStages(DB, user, args.scope), true)
-tool('stage_get', '读取学习任务、Markdown 教程、聚合人数与自己的提交。', { stageId: string }, ['stageId'],
-  ({ DB }, user, args) => stageDetail(DB, user, id(args, 'stageId')), true)
-tool('stage_create', '创建独立的关卡。教程支持 Markdown，默认私有，required 中的提交方式必须先完成才能标记学会。', stage, ['title', 'task'],
-  ({ DB }, user, args) => saveStage(DB, user, args))
+tool('stage_get', '读取学习任务、Markdown 教程、聚合人数与自己的提交。指定 courseId 可读取该课程里的讲义。', {
+  stageId: string, courseId: string,
+}, ['stageId'], ({ DB }, user, args) => studyStageDetail(DB, user, id(args, 'stageId'), args.courseId), true)
 tool('stage_update', '更新自己创建的关卡。先读取现有字段，再提交完整表单。', { stageId: string, ...stage },
   ['stageId', 'title', 'task', 'tutorial', 'methods', 'visibility'],
   ({ DB }, user, args) => saveStage(DB, user, args, id(args, 'stageId')))
@@ -80,6 +126,28 @@ tool('stage_submit_file', '上传或替换这个关卡的截图或文件。内�
     if (bytes.length > 2 * 1024 * 1024) throw new RequestError(413, 'MCP 文件上限为 2 MiB。')
     return submitFile(env, user, id(args, 'stageId'), kind, args.filename, bytes, args.courseId)
   })
+
+const wishId = { wishId: string }
+const wishCourse = { ...wishId, courseId: string }
+tool('wish_list', '按状态分页查看课程许愿。默认只查讨论中的许愿。', {
+  status: enumeration(['open', 'closed', 'all']), page: pageNumber,
+}, [], ({ DB }, user, args) => listWishes(DB, args.status, args.page), true)
+tool('wish_get', '查看许愿需求、最近回复和关联的公开课程。', wishId, ['wishId'],
+  ({ DB }, user, args) => wishDetail(DB, user, id(args, 'wishId')), true)
+tool('wish_replies', '用 before 游标读取更早的回复。', { ...wishId, before: pageNumber }, ['wishId', 'before'],
+  ({ DB }, user, args) => wishReplies(DB, id(args, 'wishId'), args.before), true)
+tool('wish_create', '发布一个课程许愿，填写想学什么和可选的学习方式。', {
+  title: string, goal: string, approach: string,
+}, ['title', 'goal'], ({ DB }, user, args) => createWish(DB, user, args))
+tool('wish_reply', '在许愿讨论中发表回复。', { ...wishId, body: string }, ['wishId', 'body'],
+  ({ DB }, user, args) => replyToWish(DB, user, id(args, 'wishId'), args))
+tool('wish_link_course', '在许愿下推荐一门公开课程。', wishCourse, ['wishId', 'courseId'],
+  ({ DB }, user, args) => linkWishCourse(DB, user, id(args, 'wishId'), args))
+tool('wish_rate_course', '仅许愿者可对关联课程点赞、点踩或撤销反馈。', {
+  ...wishCourse, reaction: enumeration(['up', 'down', 'none']),
+}, ['wishId', 'courseId', 'reaction'], ({ DB }, user, args) => rateWishCourse(DB, user, id(args, 'wishId'), id(args, 'courseId'), args))
+tool('wish_set_status', '仅许愿者可完结或重新打开自己的许愿。', { ...wishId, status: enumeration(['open', 'closed']) },
+  ['wishId', 'status'], ({ DB }, user, args) => setWishStatus(DB, user, id(args, 'wishId'), args))
 
 export async function handleMcp(request, env) {
   checkOrigin(request)

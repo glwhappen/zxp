@@ -5,7 +5,7 @@ import { authenticate, identify, manageToken } from './auth.js'
 import { checkOrigin, fail, json, objectBody, readBytes, RequestError, requireUser } from './core.js'
 import { seedExamples } from './examples.js'
 import {
-  courseDetail, joinCourse, listCourses, listStages, markLearned, saveCourse, saveStage, stageDetail,
+  courseDetail, courseOverview, joinCourse, listCourses, listStages, markLearned, ownedStage, saveCourse, saveStage, studyStageDetail,
 } from './learning.js'
 import { downloadFile, FILE_LIMIT, submitAnswer, submitFile } from './submissions.js'
 import { handleMcp } from './mcp.js'
@@ -13,6 +13,8 @@ import { adminApi } from './admin.js'
 import { getLoginSettings } from './login-config.js'
 import { beginOidc, finishOidc } from './oidc.js'
 import { profileFor, readView } from './views.js'
+import { wishApi } from './wishes.js'
+import { collaborationApi } from './collaboration.js'
 
 const scriptPath = `/assets/app.${CLIENT_DIGEST}.js`
 const stylePath = `/assets/style.${CSS_DIGEST}.css`
@@ -49,19 +51,23 @@ async function api(request, env, url) {
     return json({ profile: profileFor(user, settings), view })
   }
   if (resource === 'admin') return adminApi(request, env, user, settings, url)
+  if (resource === 'wishes') return wishApi(request, db, user, url)
   if (resource === 'courses') {
+    if (id && ['sharing', 'versions', 'stages'].includes(action)) return collaborationApi(request, db, user, url, id, action, extra)
     if (method === 'GET') {
-      return json(id ? await courseDetail(db, user, id) : await listCourses(db, user, url.searchParams.get('scope') ?? 'public'))
+      return json(id ? courseOverview(await courseDetail(db, user, id)) : await listCourses(db, user, url.searchParams.get('scope') ?? 'public'))
     }
     if (method === 'POST' && id && action === 'join') return json(await joinCourse(db, user, id))
     if ((method === 'POST' && !id) || (method === 'PUT' && id && !action)) {
       requireUser(user)
-      return json(await saveCourse(db, user, await objectBody(request), id), id ? 200 : 201)
+      return json(await saveCourse(db, user, await objectBody(request, id ? 150_000 : 2_900_000), id), id ? 200 : 201)
     }
   }
   if (resource === 'stages') {
     if (method === 'GET' && !action) {
-      return json(id ? await stageDetail(db, user, id) : await listStages(db, user, url.searchParams.get('scope') ?? 'available'))
+      if (!id) return json(await listStages(db, user, url.searchParams.get('scope') ?? 'owned'))
+      if (url.searchParams.get('manage') === '1') return json(await ownedStage(db, user, id))
+      return json(await studyStageDetail(db, user, id, url.searchParams.get('courseId')))
     }
     if ((method === 'POST' && !id) || (method === 'PUT' && id && !action)) {
       requireUser(user)
