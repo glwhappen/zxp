@@ -75,6 +75,44 @@ function showDialog(title, body, wide = false) {
   if (!dialog.open) dialog.showModal()
 }
 
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // 部分浏览器/非安全上下文下 Clipboard API 不可用，退回选中复制
+    const area = document.createElement('textarea')
+    area.value = text
+    area.style.position = 'fixed'
+    area.style.opacity = '0'
+    document.body.append(area)
+    area.select()
+    const done = document.execCommand('copy')
+    area.remove()
+    return done
+  }
+}
+
+// 一份可直接粘贴的 MCP 配置，Authorization 头已带上刚生成的令牌。
+function mcpConfigHtml(token) {
+  const config = JSON.stringify({
+    mcpServers: {
+      zxp: { type: 'http', url: location.origin + '/mcp', headers: { Authorization: 'Bearer ' + token } },
+    },
+  }, null, 2)
+  const command = `claude mcp add --transport http zxp ${location.origin}/mcp --header "Authorization: Bearer ${token}"`
+  return `<div class="mcp-config">
+    <p class="subtle">把下面这份配置粘进支持远程 MCP 的客户端（Claude Code、Cursor 等），鉴权头已经带上令牌。</p>
+    <textarea class="config-block" readonly rows="9" aria-label="MCP 客户端配置" data-mcp-config>${esc(config)}</textarea>
+    <div class="inline-actions">${button('copy-config', '复制配置', 'btn primary', 'file')}</div>
+    <details class="mcp-more"><summary>命令行接入（Claude Code）</summary>
+      <textarea class="config-block" readonly rows="3" aria-label="Claude Code 命令" data-mcp-command>${esc(command)}</textarea>
+      <div class="inline-actions">${button('copy-command', '复制命令', 'btn', 'plug')}</div>
+    </details>
+    <p class="subtle">令牌只在这次生成时显示，关掉就需要重新生成；轮换后旧令牌立即失效。</p>
+  </div>`
+}
+
 function login(mode = 'login') {
   const { methods, oidcLabel } = state.login
   const returnTo = key(/^\/(?!\/)/.test(location.pathname) ? location.pathname + location.search : '/')
@@ -122,9 +160,10 @@ function showMcp() {
       <blockquote>列出关卡库中可引用的关卡，把「配置大模型 API」加入一门叫「AI 视频练习」的私有课程。</blockquote>`)
     return
   }
-  showDialog('MCP 连接', `<p>在支持 Streamable HTTP 的 MCP 客户端中使用下方地址，添加 <code>Authorization: Bearer &lt;令牌&gt;</code> 请求头。</p>
+  showDialog('MCP 连接', `<p>让外部助手（Claude Code、Cursor、Codex 等）通过 MCP 访问你在${productName}的课程、关卡和提交记录。</p>
     <label>MCP 地址<input readonly value="${esc(location.origin)}/mcp"></label>
-    <div class="inline-actions">${button('token', '生成或轮换令牌', 'btn primary', 'plug')}${button('revoke', '撤销令牌')}</div>
+    <div class="inline-actions">${button('token', '生成令牌并复制配置', 'btn primary', 'plug')}${button('revoke', '撤销令牌')}</div>
+    <p class="subtle">每点一次都会生成新令牌，之前复制出去的配置随之失效。</p>
     <div data-token-result></div>`)
 }
 
@@ -460,9 +499,20 @@ async function handleAction(control) {
       if (!requireLogin()) break
       const result = await api('token', { method: action === 'token' ? 'POST' : 'DELETE' })
       dialog.querySelector('[data-token-result]').innerHTML = result.token
-        ? `<label>个人令牌<input readonly value="${esc(result.token)}" data-token-input></label><p class="subtle">令牌只在创建时显示。轮换后，旧令牌立即失效。</p>`
-        : '<p class="subtle" role="status">令牌已撤销。</p>'
-      dialog.querySelector('[data-token-input]')?.select()
+        ? mcpConfigHtml(result.token)
+        : '<p class="subtle" role="status">令牌已撤销，之前复制出去的配置将无法连接。</p>'
+      break
+    }
+    case 'copy-config':
+    case 'copy-command': {
+      const field = dialog.querySelector(action === 'copy-config' ? '[data-mcp-config]' : '[data-mcp-command]')
+      if (!field) break
+      const copied = await copyText(field.value)
+      if (!copied) {
+        field.focus()
+        field.select()
+      }
+      announce(copied ? '已复制，粘贴到 MCP 客户端即可。' : '复制失败，已为你选中文本，请手动复制。', !copied)
       break
     }
     case 'category':

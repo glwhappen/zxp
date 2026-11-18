@@ -239,6 +239,12 @@ dialog::backdrop { background: #24153970; backdrop-filter: blur(3px); }
 .admin-table td code { overflow-wrap: anywhere; font-size: 11px; }
 .dialog-body blockquote { border-left: 3px solid #c5aaf6; background: #f8f4ff; padding: 10px; margin-inline: 0; line-height: 1.65; }
 .account-name { display: flex; align-items: center; gap: 8px; }
+.mcp-config { display: grid; gap: 8px; }
+.config-block { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6; background: #f8f6fc; white-space: pre-wrap; word-break: break-all; overflow: auto; resize: vertical; }
+.mcp-config .inline-actions { justify-content: flex-start; }
+.mcp-more { border-top: 1px solid var(--line); padding-top: 9px; }
+.mcp-more summary { cursor: pointer; font-size: 13px; font-weight: 650; color: #473a58; margin-bottom: 7px; }
+.mcp-more .inline-actions { margin-top: 7px; }
 fieldset { margin: 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; }
 legend { font-size: 13px; font-weight: 670; color: #473a58; }
 .checks { display: flex; gap: 7px 13px; flex-wrap: wrap; }
