@@ -120,7 +120,7 @@ export async function handleMcp(request, env) {
         if (!Object.hasOwn(properties, key)) return true
         return properties[key].type === 'array' ? !Array.isArray(args[key]) : typeof args[key] !== properties[key].type
       })) return fault(-32602, 'Invalid tool arguments')
-      const user = await identify(request, env.DB, true)
+      const user = await identify(request, env, { mcp: true })
       if (!user) return json({ ...response, error: { code: -32001, message: '请先连接账号或提供有效的 MCP 令牌。' } },
         401, { 'WWW-Authenticate': 'Bearer' })
       try {

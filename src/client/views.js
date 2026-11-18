@@ -43,7 +43,7 @@ export function card(course, scope) {
   return `<a class="course-card" href="${coursePath(course.id)}" data-link>
     <div class="card-cover theme-${theme(course)}"><span class="cover-icon">${icon(topicIcon(course), 28)}</span><span class="cover-orbit"></span></div>
     <div class="card-content">
-      <div class="card-tag">${esc(course.category)}${scope === 'owned' ? visibility(course.visibility) : ''}</div>
+      <div class="card-tag">${esc(course.category)}${scope === 'owned' ? visibility(course.visibility) : ''}${course.moderated_at ? '<span class="visibility">已下架</span>' : ''}</div>
       <h3>${esc(course.title)}</h3>
       <p>${esc(course.description)}</p>
       ${scope === 'joined' ? progress(course) : ''}
@@ -75,7 +75,7 @@ export function coursePage(course, user) {
     <section class="course-intro theme-${theme(course)}">
       <div class="cover-icon">${icon(topicIcon(course), 30)}</div>
       <div class="intro-main">
-        <div class="card-tag">${esc(course.category)}${visibility(course.visibility)}</div>
+        <div class="card-tag">${esc(course.category)}${visibility(course.visibility)}${course.moderated_at ? '<span class="visibility">已下架</span>' : ''}</div>
         <h1>${esc(course.title)}</h1><p>${esc(course.description)}</p>
         <div class="intro-meta"><span>${icon('user', 16)}${esc(course.author)}</span><span>${icon('layers', 16)}${course.stageCount} 个关卡</span><span>${icon('users', 16)}${course.learnerCount} 人学习</span></div>
       </div>

@@ -9,6 +9,9 @@ import {
 } from './learning.js'
 import { downloadFile, FILE_LIMIT, submitAnswer, submitFile } from './submissions.js'
 import { handleMcp } from './mcp.js'
+import { adminApi } from './admin.js'
+import { getLoginSettings } from './login-config.js'
+import { beginOidc, finishOidc } from './oidc.js'
 
 const assets = new Map([
   ['/app.js', [client, 'text/javascript; charset=utf-8']],
@@ -25,13 +28,20 @@ async function api(request, env, url) {
   const method = request.method
   if (method !== 'GET') checkOrigin(request)
   const [, , resource, id, action, extra] = url.pathname.split('/')
+  const settings = await getLoginSettings(env)
   if (resource === 'auth' && method === 'POST' && ['register', 'login', 'logout'].includes(id)) {
-    return authenticate(request, db, id)
+    return authenticate(request, env, id, settings)
   }
-  const user = await identify(request, db)
-  if (resource === 'me' && method === 'GET') return json({ user, hosted: SITES_HOSTED })
+  if (resource === 'auth' && method === 'GET' && id === 'oidc') {
+    if (action === 'start') return beginOidc(request, env, settings)
+    if (action === 'callback') return finishOidc(request, env, settings)
+  }
+  const user = await identify(request, env, { settings })
+  if (resource === 'me' && method === 'GET') return json({ user, hosted: SITES_HOSTED,
+    login: { methods: settings.methods, oidcLabel: settings.oidcLabel } })
   if (resource === 'token' && ['POST', 'DELETE'].includes(method)) return json(await manageToken(db, user, method))
   await seedExamples(db)
+  if (resource === 'admin') return adminApi(request, env, user, settings, url)
   if (resource === 'courses') {
     if (method === 'GET') {
       return json(id ? await courseDetail(db, user, id) : await listCourses(db, user, url.searchParams.get('scope') ?? 'public'))

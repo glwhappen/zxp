@@ -17,7 +17,7 @@ function enabledMethods(methods) {
 
 const courseSelect = `
   SELECT c.id, c.title, c.description, c.category, c.theme, c.visibility, u.name AS author,
-    c.owner_id = ? AS owned, c.updated_at,
+    c.owner_id = ? AS owned, c.updated_at, c.moderated_at,
     EXISTS(SELECT 1 FROM enrollments e WHERE e.course_id = c.id AND e.user_id = ?) AS joined,
     (SELECT COUNT(*) FROM course_stages cs WHERE cs.course_id = c.id) AS stageCount,
     (SELECT COUNT(*) FROM course_stages cs JOIN progress p ON p.stage_id = cs.stage_id
@@ -26,12 +26,14 @@ const courseSelect = `
   FROM courses c JOIN users u ON u.id = c.owner_id
 `
 
+const publicCourse = "(c.visibility = 'public' AND c.moderated_at IS NULL)"
+
 export async function listCourses(db, user, scope = 'public') {
   const id = user?.id ?? ''
   const where = {
-    public: "c.visibility = 'public' AND ? IS NOT NULL",
+    public: `${publicCourse} AND ? IS NOT NULL`,
     owned: 'c.owner_id = ?',
-    joined: "(c.visibility = 'public' OR c.owner_id = ?) AND EXISTS (SELECT 1 FROM enrollments WHERE course_id = c.id AND user_id = ?)",
+    joined: `(${publicCourse} OR c.owner_id = ?) AND EXISTS (SELECT 1 FROM enrollments WHERE course_id = c.id AND user_id = ?)`,
   }
   if (!Object.hasOwn(where, scope)) fail(400, '课程范围无效。')
   const params = scope === 'joined' ? [id, id] : [id]
@@ -42,7 +44,7 @@ export async function listCourses(db, user, scope = 'public') {
 export async function courseDetail(db, user, courseId) {
   const id = user?.id ?? ''
   const course = await statement(db, courseSelect + `
-    WHERE c.id = ? AND (c.visibility = 'public' OR c.owner_id = ?)
+    WHERE c.id = ? AND (${publicCourse} OR c.owner_id = ?)
   `, id, id, id, courseId, id).first()
   if (!course) fail(404, '课程不存在或当前账号无权访问。')
   const stages = await rows(statement(db, `
@@ -176,7 +178,7 @@ export async function joinCourse(db, user, courseId) {
   await courseDetail(db, user, courseId)
   await statement(db, `
     INSERT OR IGNORE INTO enrollments (course_id, user_id)
-    SELECT id, ? FROM courses WHERE id = ? AND (visibility = 'public' OR owner_id = ?)
+    SELECT c.id, ? FROM courses c WHERE c.id = ? AND (${publicCourse} OR c.owner_id = ?)
   `, id, courseId, id).run()
   return courseDetail(db, user, courseId)
 }
@@ -186,7 +188,7 @@ export async function joinFromStage(db, user, courseId, stageId) {
   await statement(db, `
     INSERT OR IGNORE INTO enrollments (course_id, user_id)
     SELECT c.id, ?1 FROM courses c JOIN course_stages cs ON cs.course_id = c.id
-    WHERE c.id = ?2 AND cs.stage_id = ?3 AND (c.visibility = 'public' OR c.owner_id = ?1)
+    WHERE c.id = ?2 AND cs.stage_id = ?3 AND (${publicCourse} OR c.owner_id = ?1)
   `, user.id, courseId, stageId).run()
 }
 

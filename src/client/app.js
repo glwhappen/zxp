@@ -1,4 +1,5 @@
 import { icon } from './icons.js'
+import { adminPage, providerNames } from './admin.js'
 import { hasSubmissionMarker, submissionKinds, submissionMarker } from './tutorial.js'
 import {
   button, card, categories, courseEditor, coursePage, coursePath, esc, hero, key, link, note, outline,
@@ -11,7 +12,7 @@ const topbar = document.querySelector('#topbar')
 const dialog = document.querySelector('#dialog')
 const toast = document.querySelector('#toast')
 const productName = '知行谱'
-const state = { user: null, hosted: false, path: '', category: '', query: '', current: null, editor: null }
+const state = { user: null, hosted: false, login: { methods: {} }, path: '', category: '', query: '', current: null, editor: null }
 let navigation = 0
 let toastTimeout
 
@@ -33,6 +34,11 @@ async function api(path, options = {}) {
   return data
 }
 
+async function refreshIdentity() {
+  const { user, hosted, login } = await api('me')
+  Object.assign(state, { user, hosted, login })
+}
+
 function announce(message, error = false) {
   toast.className = error ? 'toast error' : 'toast'
   toast.innerHTML = `${icon(error ? 'close' : 'check', 16)} ${esc(message)}`
@@ -48,20 +54,24 @@ function showDialog(title, body, wide = false) {
 }
 
 function login(mode = 'login') {
-  if (state.hosted) {
-    const returnTo = /^\/(?!\/)/.test(location.pathname) ? location.pathname : '/'
-    showDialog(`登录${productName}`, `<p>使用 ChatGPT 账号保存你的学习进度、提交作业和创建课程。</p>
-      <a class="btn primary" href="/signin-with-chatgpt?return_to=${key(returnTo)}" target="_top">使用 ChatGPT 登录</a>`)
-    return
-  }
+  const { methods, oidcLabel } = state.login
+  const returnTo = key(/^\/(?!\/)/.test(location.pathname) ? location.pathname + location.search : '/')
+  const providers = `<div class="login-providers">
+    ${methods.chatgpt ? `<a class="btn" href="/signin-with-chatgpt?return_to=${returnTo}" target="_top">使用 ChatGPT 登录</a>` : ''}
+    ${methods.oidc ? `<a class="btn ${methods.password ? '' : 'primary'}" href="/api/auth/oidc/start?return_to=${returnTo}" target="_top">${esc(oidcLabel)}</a>` : ''}
+  </div>`
+  const hasProviders = methods.chatgpt || methods.oidc
   const register = mode === 'register'
-  showDialog(register ? '创建账号' : `登录${productName}`, `<form data-form="auth" data-mode="${mode}">
+  showDialog(register ? '创建账号' : `登录${productName}`, `
+    ${hasProviders ? providers : ''}
+    ${methods.password ? `<form data-form="auth" data-mode="${mode}">
     ${register ? '<label>昵称<input name="name" maxlength="40" autocomplete="nickname" required></label>' : ''}
     <label>用户名<input name="username" autocomplete="username" minlength="3" maxlength="32" required></label>
     <label>密码<input name="password" type="password" minlength="8" maxlength="128" autocomplete="${register ? 'new-password' : 'current-password'}" required></label>
     <div class="form-error" role="alert" hidden></div><div class="submit-row">
       ${button(register ? 'login' : 'register', register ? '已有账号，去登录' : '没有账号，去注册', 'text-btn')}
-      <button class="btn primary">${register ? '注册' : '登录'}</button></div></form>`)
+      <button class="btn primary">${register ? '注册' : '登录'}</button></div></form>` : ''}
+    ${!hasProviders && !methods.password ? '<p>当前没有可用的登录方式。请联系站点管理员。</p>' : ''}`)
   dialog.querySelector('input')?.focus()
 }
 
@@ -73,9 +83,14 @@ function requireLogin() {
 
 function account() {
   if (!requireLogin()) return
+  const alternatives = Object.keys(state.login.methods).some(key => state.login.methods[key] && key !== state.user.provider)
   showDialog('我的账号', `<p class="account-name"><span class="avatar">${esc(state.user.name.slice(0, 1))}</span> ${esc(state.user.name)}</p>
-    ${state.hosted ? '<a class="btn" href="/signout-with-chatgpt?return_to=%2F" target="_top">退出登录</a>'
-      : button('logout', '退出登录')}`)
+    <p class="subtle">${esc(providerNames[state.user.provider])} · 账号 ID <code>${esc(state.user.id)}</code></p>
+    ${state.user.oidcSubject ? `<p class="subtle account-id">OIDC Subject <code>${esc(state.user.oidcSubject)}</code></p>` : ''}
+    <div class="inline-actions">${state.user.isAdmin ? link('/admin', '管理后台', 'btn', 'lock') : ''}
+      ${alternatives ? button('login', '切换登录方式') : ''}
+      ${state.user.provider === 'chatgpt' ? '<a class="btn" href="/signout-with-chatgpt?return_to=%2F" target="_top">退出登录</a>'
+        : button('logout', '退出登录')}</div>`)
 }
 
 function showMcp() {
@@ -96,6 +111,7 @@ function paintShell() {
     ['学习', [['/', '探索课程', 'compass'], ['/learning', '我的学习', 'book']]],
     ['创作', [['/owned', '我的创作', 'grid'], ['/stages', '关卡库', 'layers']]],
   ]
+  if (state.user?.isAdmin) sections.push(['管理', [['/admin', '管理后台', 'lock']]])
   const active = state.path === '/' || /^\/course\/[^/]+(?:\/stage\/[^/]+)?$/.test(state.path)
     ? '/' : state.path.startsWith('/stage/') ? '/stages'
       : state.path.startsWith('/course/') ? '/owned' : state.path
@@ -179,6 +195,15 @@ async function navigate(path = location.pathname, push = false) {
       if (version !== navigation) return
       state.current = { courses }
       paintExplore(courses)
+    } else if (path === '/admin') {
+      if (!state.user) {
+        main.innerHTML = `<div class="sign-in-panel">${note('登录管理员账号后进入后台。', 'lock')}${button('login', '登录', 'btn primary')}</div>`
+        return
+      }
+      const admin = await api('admin')
+      if (version !== navigation) return
+      state.current = { admin }
+      main.innerHTML = adminPage(admin)
     } else if (['learning', 'owned'].includes(parts[0]) && parts.length === 1) {
       const scope = parts[0] === 'owned' ? 'owned' : 'joined'
       const courses = state.user ? await api('courses?scope=' + scope) : []
@@ -264,9 +289,23 @@ async function handleAction(control) {
     case 'account': account(); break
     case 'logout':
       await api('auth/logout', { method: 'POST' })
-      state.user = null
+      await refreshIdentity()
       await navigate('/', true)
       break
+    case 'admin-course': {
+      const admin = state.current.admin
+      const hidden = control.dataset.hidden === 'true'
+      const updated = await api('admin/courses/' + key(id), { method: 'PUT', body: { hidden } })
+      if (state.current?.admin !== admin) break
+      admin.courses.find(course => course.id === id).moderated_at = updated.moderated_at
+      const row = control.closest('tr')
+      row.cells[1].textContent = hidden ? '已下架'
+        : admin.courses.find(course => course.id === id).visibility === 'public' ? '公开' : '私有'
+      control.dataset.hidden = String(!hidden)
+      control.textContent = hidden ? '恢复' : '下架'
+      announce(hidden ? '课程已下架。' : '课程已恢复。')
+      break
+    }
     case 'menu': {
       const opened = document.body.classList.toggle('menu-open')
       control.setAttribute('aria-expanded', String(opened))
@@ -380,10 +419,27 @@ async function handleForm(form) {
       else paintExplore(state.current.courses)
       break
     case 'auth': {
-      const result = await api('auth/' + form.dataset.mode, { method: 'POST', body })
-      state.user = result.user
+      await api('auth/' + form.dataset.mode, { method: 'POST', body })
+      await refreshIdentity()
       await navigate()
       announce('已登录。')
+      break
+    }
+    case 'admin-login': {
+      const methods = Object.fromEntries(['chatgpt', 'password', 'oidc'].map(key => [key, data.has(key)]))
+      await api('admin/login-methods', { method: 'PUT', body: methods })
+      await refreshIdentity()
+      if (!state.user?.isAdmin) await navigate('/', true)
+      announce('登录方式已更新。')
+      break
+    }
+    case 'admin-search': {
+      const version = navigation
+      const admin = await api('admin?q=' + key(data.get('q')))
+      if (version !== navigation) break
+      state.current = { admin }
+      main.innerHTML = adminPage(admin)
+      main.querySelector('input[name="q"]').focus({ preventScroll: true })
       break
     }
     case 'course': {
@@ -500,10 +556,14 @@ dialog.addEventListener('click', event => {
 })
 window.addEventListener('popstate', () => navigate())
 try {
-  const { user, hosted } = await api('me')
-  state.user = user
-  state.hosted = hosted
+  await refreshIdentity()
   await navigate()
+  const url = new URL(location.href)
+  if (url.searchParams.get('auth_error') === 'oidc') {
+    url.searchParams.delete('auth_error')
+    history.replaceState({}, '', url)
+    announce('OIDC 登录未完成，请重试。', true)
+  }
 } catch (error) {
   paintShell()
   main.innerHTML = note(error.message, 'close')

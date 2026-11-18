@@ -201,6 +201,26 @@ dialog::backdrop { background: #24153970; backdrop-filter: blur(3px); }
 .dialog-body { padding: 18px 20px; }
 .dialog-body > * + * { margin-top: 12px; }
 .dialog-body p, blockquote { font-size: 14px; color: #51445f; }
+.login-providers { display: grid; gap: 8px; }
+.login-providers + form { padding-top: 14px; border-top: 1px solid var(--line); }
+.account-name + p, .account-id { overflow-wrap: anywhere; }
+.admin-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 12px; margin: 0; }
+.admin-metrics > div { padding: 16px; }
+.admin-metrics dt { font-size: 13px; color: #625672; }
+.admin-metrics dd { font-size: 28px; font-weight: 780; margin: 5px 0 0; color: #422387; }
+.admin-panels { display: grid; gap: 10px; margin-top: 14px; }
+.admin-panels > section { margin: 0; }
+.admin-login-form { display: grid; gap: 8px; margin-top: 12px; }
+.admin-login-form label.admin-method { display: flex; align-items: flex-start; gap: 9px; padding: 10px; border: 1px solid #eee9f5; border-radius: 10px; }
+.admin-method input { margin: 2px 0; }
+.admin-method small { display: block; margin-top: 2px; font-weight: 400; }
+.admin-search { display: flex; align-items: center; gap: 7px; margin: 12px 0; }
+.admin-table { overflow-x: auto; margin-top: 8px; }
+.admin-table table { border-collapse: collapse; width: 100%; font-size: 14px; text-align: left; }
+.admin-table th, .admin-table td { padding: 8px; border-bottom: 1px solid #eee9f5; }
+.admin-table th { color: #5d4c72; font-size: 12px; }
+.admin-table td small { display: block; margin-top: 2px; color: #6e617d; }
+.admin-table td code { overflow-wrap: anywhere; font-size: 11px; }
 .dialog-body blockquote { border-left: 3px solid #c5aaf6; background: #f8f4ff; padding: 10px; margin-inline: 0; line-height: 1.65; }
 .account-name { display: flex; align-items: center; gap: 8px; }
 fieldset { margin: 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; }
