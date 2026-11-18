@@ -994,7 +994,8 @@ async function handleForm(form) {
     case 'course-new-stage': {
       const editor = state.editor
       const { course, stage } = await api('courses/' + key(editor.course.id) + '/stages', {
-        method: 'POST', body: courseWriteBody(editor, { ...body, methods: data.getAll('methods') }),
+        method: 'POST',
+        body: courseWriteBody(editor, { ...body, methods: data.getAll('methods'), required: data.getAll('required') }),
       })
       editor.ids.push(stage.id)
       syncCourseEditor(editor, course, stage)
@@ -1146,7 +1147,7 @@ document.addEventListener('input', event => {
       option.hidden = !option.textContent.toLowerCase().includes(input.value.trim().toLowerCase())
     }
   }
-  if (input.matches('input[name="methods"]') && input.form?.dataset.form === 'stage') {
+  if (input.matches('input[name="methods"]') && input.form?.querySelector('input[name="required"]')) {
     const toggle = input.form.querySelector(`input[name="required"][value="${CSS.escape(input.value)}"]`)
     if (toggle) {
       toggle.disabled = !input.checked
