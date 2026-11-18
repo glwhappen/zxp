@@ -157,7 +157,7 @@ function showMcp() {
   if (state.hosted) {
     showDialog('MCP 连接', `<p>在 ChatGPT 或 Codex 的「插件 → 个人 → 由你创建」中连接${productName}。</p>
       <p>让助手先列出关卡，再为你创建课程。例如：</p>
-      <blockquote>列出关卡库中可引用的关卡，把「配置大模型 API」加入一门叫「AI 视频练习」的私有课程。</blockquote>`)
+      <blockquote>列出我创建的关卡，把「配置大模型 API」加入一门叫「AI 视频练习」的私有课程。</blockquote>`)
     return
   }
   showDialog('MCP 连接', `<p>让外部助手（Claude Code、Cursor、Codex 等）通过 MCP 访问你在${productName}的课程、关卡和提交记录。</p>
@@ -192,7 +192,7 @@ function paintShell() {
   shellIdentity = identity
   const sections = [
     ['学习', [['/', '探索课程', 'compass'], ['/learning', '我的学习', 'book']]],
-    ['创作', [['/owned', '我的创作', 'grid'], ['/stages', '关卡库', 'layers']]],
+    ['创作', [['/owned', '我的创作', 'grid'], ['/stages', '我的关卡', 'layers']]],
   ]
   if (state.user?.isAdmin) sections.push(['管理', [['/admin', '管理后台', 'lock']]])
   sidebar.innerHTML = `<a class="brand" href="/" data-link><span class="brand-icon">${icon('logo', 23)}</span>
@@ -249,12 +249,18 @@ function courseShelf(courses, scope) {
 }
 
 function stagesPage(stages) {
-  main.innerHTML = `<div class="page-heading section-head"><div><h1>关卡库</h1>
-    <p>浏览可复用的公开关卡，或创建你的独立关卡。</p></div>${button('new-stage', '新建关卡', 'btn primary', 'plus')}</div>
+  if (!state.user) {
+    main.innerHTML = `<div class="sign-in-panel">${note('登录后管理你的关卡。', 'lock')}${button('login', '登录', 'btn primary')}</div>`
+    return
+  }
+  main.innerHTML = `<div class="page-heading section-head"><div><h1>我的关卡</h1>
+    <p>你创建的可复用关卡：放进自己的多门课程时，学习记录会同步。新建和编辑都在课程编辑器里做。</p></div>
+    ${link('/owned', '去我的创作', 'btn', 'grid')}</div>
     <div class="stage-grid">${stages.map(stage => `<a class="library-stage" data-link href="${stagePath(stage.id)}">
       <span class="library-icon">${icon('layers', 22)}</span><span class="step-text"><strong>${esc(stage.title)}</strong>
-      <small>${esc(stage.task)}</small><small>${esc(stage.author)} · ${stage.visibility === 'public' ? '公开' : '私有'}</small></span>
-      ${icon('arrow', 16)}</a>`).join('') || note('还没有可用关卡。')}</div>`
+      <small>${esc(stage.task)}</small>
+      <small>${stage.visibility === 'public' ? '公开' : '私有'} · ${stage.courseCount ? `被 ${stage.courseCount} 门课程引用` : '还没有课程引用'} · ${stage.learnedCount} 人学会</small></span>
+      ${icon('arrow', 16)}</a>`).join('') || note('还没有关卡。到「我的创作」编辑课程，点「新建关卡」创建后就能在其他课程里引用。')}</div>`
 }
 
 function paintView({ profile, view }, path) {
@@ -407,10 +413,10 @@ function requiresDialog(stageId) {
 function chooseStageDialog() {
   const entries = state.editor.available.filter(stage => !state.editor.ids.includes(stage.id))
   showDialog('引用已有的关卡', `<label>搜索关卡<input type="search" placeholder="输入名称或作者" data-stage-filter></label>
-    <p class="subtle">可以引用公开关卡，以及你自己创建的私有关卡。</p>
+    <p class="subtle">只能引用你自己创建的关卡；同一个关卡在多门课程里共用学会状态和提交记录。</p>
     <div class="stage-options">${entries.map(stage => `<button type="button" class="stage-option" data-action="attach-stage" data-id="${esc(stage.id)}">
       <span class="step-text"><strong>${esc(stage.title)}</strong><small>${esc(stage.author)}</small></span>
-      ${visibility(stage.visibility)}${icon('plus', 17)}</button>`).join('') || note('没有更多可引用的关卡。')}</div>`, true)
+      ${visibility(stage.visibility)}${icon('plus', 17)}</button>`).join('') || note('你还没有其他可以引用的关卡，先在课程里新建一个。')}</div>`, true)
 }
 
 function syncCourseProgress(course, stage, joinedCourseId) {

@@ -197,7 +197,7 @@ export function stagePage(stage, course, entry) {
         <section class="task-box"><h2>${icon('target', 20)} 学习任务</h2><p>${esc(stage.task)}</p></section>
         ${tutorialPanel(stage)}
       </article>`
-  return `<p class="breadcrumb">${course ? link(coursePath(course.id), esc(course.title), 'back', 'left') : link('/stages', '关卡库', 'back', 'left')}</p>
+  return `<p class="breadcrumb">${course ? link(coursePath(course.id), esc(course.title), 'back', 'left') : link('/stages', '我的关卡', 'back', 'left')}</p>
     <div class="learning-layout ${course ? '' : 'standalone'}">
       ${lesson}
       ${course ? `<aside class="lesson-outline"><h2>本课关卡</h2><div data-outline>${progress(course)}${outline(course, stage.id)}</div></aside>` : ''}
@@ -224,7 +224,7 @@ export function pickedStages(editor) {
       ${button('move-up', '', 'icon-btn', 'up', `${attrs} aria-label="上移" ${index === 0 ? 'disabled' : ''}`)}
       ${button('move-down', '', 'icon-btn', 'down', `${attrs} aria-label="下移" ${index === editor.ids.length - 1 ? 'disabled' : ''}`)}
       ${button('remove-stage', '', 'icon-btn', 'close', `${attrs} aria-label="移除关卡" title="移除关卡"`)}</li>`
-  }).join('')}</ol>` : note('创建新的关卡，或从关卡库引用一个已有的关卡。')
+  }).join('')}</ol>` : note('新建一个关卡，或引用你自己之前创建的关卡。')
 }
 
 export function courseEditor(editor) {
@@ -245,7 +245,7 @@ export function courseEditor(editor) {
         ${button('pick-stage', '引用已有', 'btn', 'link')}${button('new-stage', '新建关卡', 'btn', 'plus')}
       </div></div>
       <div data-picked-stages>${pickedStages(editor)}</div>
-      <p class="subtle">同一个关卡可以出现在多门课里。发布课程前，先公开其中所有关卡。</p>
+      <p class="subtle">同一个关卡可以出现在你的多门课程里。发布课程前，先公开其中所有关卡。</p>
       <div class="form-error" role="alert" hidden></div><div class="submit-row"><button class="btn primary">${item.id ? '保存课程' : '创建课程'}</button></div>
     </form>`
 }

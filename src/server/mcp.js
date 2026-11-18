@@ -55,7 +55,7 @@ tool('course_update', '更新自己创建的课程，保留课程 ID。先读取
   ({ DB }, user, args) => saveCourse(DB, user, args, id(args, 'courseId')))
 tool('course_join', '将课程加入我的学习。', { courseId: string }, ['courseId'],
   ({ DB }, user, args) => joinCourse(DB, user, id(args, 'courseId')))
-tool('stage_list', '列出可引用的公开关卡或自己拥有的关卡。', { scope: enumeration(['available', 'owned']) }, [],
+tool('stage_list', '列出你创建的可复用关卡。课程只能引用自己创建的关卡，所以 available 与 owned 等价。', { scope: enumeration(['available', 'owned']) }, [],
   ({ DB }, user, args) => listStages(DB, user, args.scope), true)
 tool('stage_get', '读取学习任务、Markdown 教程、聚合人数与自己的提交。', { stageId: string }, ['stageId'],
   ({ DB }, user, args) => stageDetail(DB, user, id(args, 'stageId')), true)

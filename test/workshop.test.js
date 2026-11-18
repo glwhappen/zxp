@@ -137,7 +137,7 @@ async function register(username) {
   return res.headers.get('Set-Cookie').split(';')[0]
 }
 
-test('public levels share progress while private courses and submissions enforce ownership', async () => {
+test('own levels stay reusable across own courses and cannot be borrowed by others', async () => {
   const alice = await register('alice')
   const bob = await register('bob')
   const stage = await data('/api/stages', { method: 'POST', cookie: alice, json: {
@@ -147,10 +147,16 @@ test('public levels share progress while private courses and submissions enforce
   const first = await data('/api/courses', { method: 'POST', cookie: alice, json: {
     title: '公开课程', visibility: 'public', stageIds: [stage.id],
   } }, 201)
-  const second = await data('/api/courses', { method: 'POST', cookie: bob, json: {
-    title: '私有课程', stageIds: [stage.id],
+  const second = await data('/api/courses', { method: 'POST', cookie: alice, json: {
+    title: '第二门课', visibility: 'public', stageIds: [stage.id],
   } }, 201)
-  await data('/api/courses/' + second.id, { cookie: alice }, 404)
+  await data('/api/courses', { method: 'POST', cookie: bob, json: {
+    title: '借用他人关卡', stageIds: [stage.id],
+  } }, 400)
+  const hidden = await data('/api/courses', { method: 'POST', cookie: alice, json: {
+    title: '私有课程', stageIds: [],
+  } }, 201)
+  await data('/api/courses/' + hidden.id, { cookie: bob }, 404)
   const path = '/api/stages/' + stage.id
   await data(path, { method: 'PUT', cookie: bob, json: {} }, 403)
   await data(path, { method: 'PUT', cookie: alice, json: { ...stage, visibility: 'private' } }, 409)
@@ -163,9 +169,11 @@ test('public levels share progress while private courses and submissions enforce
   for (let i = 0; i < 2; i++) {
     await data(path + '/learned', { method: 'PUT', cookie: bob, json: { learned: true, courseId: first.id } })
   }
+  assert.equal((await data('/api/courses/' + first.id, { cookie: bob })).completedCount, 1)
   const reused = await data('/api/courses/' + second.id, { cookie: bob })
   assert.equal(reused.completedCount, 1)
   assert.equal(reused.stages[0].learned, true)
+  assert.equal((await data('/api/courses/' + second.id, { cookie: alice })).completedCount, 0)
   const otherUser = await data(path, { cookie: alice })
   assert.deepEqual(otherUser.stats, { learned: 1, answer: 1, screenshot: 0, file: 0, participants: 1 })
   assert.equal(otherUser.learned, false)
@@ -173,6 +181,9 @@ test('public levels share progress while private courses and submissions enforce
   await data(path + '/learned', { method: 'PUT', cookie: bob, json: { learned: false } })
   assert.equal((await data('/api/courses/' + first.id, { cookie: bob })).completedCount, 0)
   assert.equal((await data('/api/courses?scope=joined', { cookie: bob })).length, 1)
+  const library = await data('/api/stages', { cookie: alice })
+  assert.deepEqual(library.map(entry => [entry.id, entry.courseCount]), [[stage.id, 2]])
+  assert.deepEqual(await data('/api/stages', { cookie: bob }), [])
 })
 
 test('screenshots and replacement files stay private and are counted once', async () => {
@@ -211,12 +222,14 @@ test('MCP creates courses with a revocable user token', async () => {
   assert.equal(discovery.result.supportedVersions[0], '2026-07-28')
   const listing = await rpc('tools/list')
   assert(listing.result.tools.some(tool => tool.name === 'course_create'))
-  const created = await rpc('tools/call', { name: 'course_create', arguments: {
-    title: 'MCP 课程', stageIds: ['api-setup', 'video-shots'], requires: { 'video-shots': ['api-setup'] },
-  } })
-  const course = JSON.parse(created.result.content[0].text)
-  assert.equal(course.stages[0].id, 'api-setup')
-  assert.deepEqual(course.stages[1].requires, ['api-setup'])
+  const call = async (name, args) => JSON.parse((await rpc('tools/call', { name, arguments: args })).result.content[0].text)
+  const first = await call('stage_create', { title: 'MCP 关卡一', task: '先做这一步', methods: ['learned', 'answer'], required: ['answer'] })
+  const second = await call('stage_create', { title: 'MCP 关卡二', task: '再做这一步', methods: ['learned'] })
+  const course = await call('course_create', {
+    title: 'MCP 课程', stageIds: [first.id, second.id], requires: { [second.id]: [first.id] },
+  })
+  assert.equal(course.stages[0].id, first.id)
+  assert.deepEqual(course.stages[1].requires, [first.id])
   assert.deepEqual(course.stages[0].required, ['answer'])
   assert.equal(course.visibility, 'private')
   assert.equal((await data('/api/courses?scope=owned', { cookie }))[0].id, course.id)

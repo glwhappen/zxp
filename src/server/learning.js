@@ -85,16 +85,18 @@ export async function courseDetail(db, user, courseId) {
   return { ...course, stages: outline }
 }
 
-export async function listStages(db, user, scope = 'available') {
+// 课程只能引用自己创建的关卡，所以「可用」与「我的」两个范围一致。
+export async function listStages(db, user, scope = 'owned') {
   const id = user?.id ?? ''
   choice(scope, ['available', 'owned'], '关卡范围')
-  const where = scope === 'owned' ? 's.owner_id = ?' : "(s.owner_id = ? OR s.visibility = 'public')"
   const list = await rows(statement(db, `
-    SELECT s.id, s.title, s.task, s.visibility, s.owner_id = ? AS owned, u.name AS author
+    SELECT s.id, s.title, s.task, s.visibility, 1 AS owned, u.name AS author,
+      (SELECT COUNT(*) FROM course_stages cs WHERE cs.stage_id = s.id) AS courseCount,
+      (SELECT COUNT(*) FROM progress p WHERE p.stage_id = s.id) AS learnedCount
     FROM stages s JOIN users u ON u.id = s.owner_id
-    WHERE ${where} ORDER BY s.updated_at DESC, s.title
-  `, id, id))
-  return list.map(stage => ({ ...stage, owned: Boolean(stage.owned) }))
+    WHERE s.owner_id = ? ORDER BY s.updated_at DESC, s.title
+  `, id))
+  return list.map(stage => ({ ...stage, owned: true }))
 }
 
 function stageQuery(db, user, stageId) {
@@ -191,10 +193,10 @@ export async function saveCourse(db, user, data, courseId) {
   const requires = stageRequires(data, ids)
   if (ids.length) {
     const accessible = await rows(statement(db, `
-      SELECT id, visibility FROM stages WHERE (owner_id = ? OR visibility = 'public')
+      SELECT id, visibility FROM stages WHERE owner_id = ?
       AND id IN (${ids.map(() => '?').join(', ')})
     `, owner, ...ids))
-    if (accessible.length !== ids.length) fail(404, '选择中包含无法访问的关卡。')
+    if (accessible.length !== ids.length) fail(400, '课程只能引用你自己创建的关卡，请先移除其他作者的关卡。')
     if (visibility === 'public' && accessible.some(stage => stage.visibility !== 'public')) {
       fail(409, '发布课程前，请先公开选中的关卡，或移除私有的关卡。')
     }
