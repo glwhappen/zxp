@@ -4,7 +4,7 @@ import { createViewCache } from './view-cache.js'
 import { createCourseAutosave } from './course-autosave.js'
 import { courseHistory, courseSharingForm, courseVersionPreview, editorChoices } from './collaboration.js'
 import { wishBoard, wishCoursePicker, wishCourses, wishDiscussion, wishForm, wishHeading, wishPage, wishPath } from './wishes.js'
-import { askMarker, hasSubmissionMarker, submissionKinds, submissionMarker } from './tutorial.js'
+import { askMarker, hasSubmissionMarker, submissionKinds, submissionMarker, submissionSpecs } from './tutorial.js'
 import {
   button, card, categories, courseEditor, coursePage, coursePath, esc, hero, key, link, note, notesPanel, outline,
   pickedStages, prerequisiteEditor, progress, stageEditor, stagePage, stagePath, stageStats, submission, visibility,
@@ -926,15 +926,26 @@ async function handleAction(control) {
       const marker = `\n\n${submissionMarker(kind)}\n\n`
       if (hasSubmissionMarker(tutorial.value, kind)) {
         if (checkbox) checkbox.checked = true
-        status.textContent = '教程中已有这类提交框，可移动原标记调整位置。'
+        const spec = submissionSpecs(tutorial.value).find(item => item.kind === kind)
+        status.textContent = spec?.prompt
+          ? '教程中已有这类提交框，可移动原标记调整位置。'
+          : `已有标记但没写说明：把它改成 {{submit:${kind}|这一题要交什么}}。`
         break
       }
-      if (tutorial.value.length + marker.length > tutorial.maxLength) {
+      const promptInput = form.querySelector('[data-submit-prompt]')
+      const promptText = (promptInput?.value ?? '').trim().replace(/[|\n}]/g, ' ').slice(0, 300)
+      if (promptText.length < 4) {
+        status.textContent = '先在上面写清这一题要交什么（例如：写下 3 个候选和理由），再插入提交框。'
+        promptInput?.focus()
+        break
+      }
+      const withPrompt = `\n\n${submissionMarker(kind, promptText)}\n\n`
+      if (tutorial.value.length + withPrompt.length > tutorial.maxLength) {
         status.textContent = '教程已接近长度上限，请缩短内容后再插入。'
         break
       }
       const position = tutorial.selectionEnd
-      tutorial.setRangeText(marker, position, position, 'end')
+      tutorial.setRangeText(withPrompt, position, position, 'end')
       if (checkbox) checkbox.checked = true
       status.textContent = '已插入提交框。你可以移动教程中的标记调整位置。'
       tutorial.focus()
@@ -969,8 +980,20 @@ async function handleAction(control) {
         announce('教程已接近长度上限，请缩短内容后再插入。', true)
         break
       }
+      const promptInput = form.querySelector('[data-submit-prompt]')
+      const promptText = (promptInput?.value ?? '').trim().replace(/[|\n}]/g, ' ').slice(0, 300)
+      if (promptText.length < 4) {
+        status.textContent = '先在上面写清这一题要交什么（例如：写下 3 个候选和理由），再插入提交框。'
+        promptInput?.focus()
+        break
+      }
+      const withPrompt = `\n\n${submissionMarker(kind, promptText)}\n\n`
+      if (tutorial.value.length + withPrompt.length > tutorial.maxLength) {
+        status.textContent = '教程已接近长度上限，请缩短内容后再插入。'
+        break
+      }
       const position = tutorial.selectionEnd
-      tutorial.setRangeText(marker, position, position, 'end')
+      tutorial.setRangeText(withPrompt, position, position, 'end')
       tutorial.focus()
       queueCourseDraft(form)
       announce('已插入提问，学习者可以在对应步骤直接填写。')

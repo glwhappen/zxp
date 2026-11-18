@@ -2,7 +2,7 @@ import {
   enabledMethods, KINDS, kindLabels, METHODS, missingRequired, parseList, requiredMethods,
 } from '../shared.js'
 import { choice, fail, field, requireUser, rows, statement } from './core.js'
-import { hasSubmissionMarker } from '../client/tutorial.js'
+import { submissionSpecs } from '../client/tutorial.js'
 import { listNotes } from './notes.js'
 import { ADMIN_LABELS, COURSE_LABELS, courseLabelKeys } from '../shared.js'
 import { commitCourse, editableCourse, expectEditor, expectRevision, guardCourse, publicCourse, readableCourse, sharedCourse } from './course-access.js'
@@ -359,9 +359,18 @@ export async function saveCourse(db, user, data, courseId) {
 
 // 提交框只出现在作者手动占位的地方：开启了提交方式就必须在教程里写 {{submit:kind}}。
 export function assertSubmissionMarkers(tutorial, methods) {
+  const specs = submissionSpecs(tutorial)
   for (const kind of methods) {
-    if (kind === 'learned' || hasSubmissionMarker(tutorial, kind)) continue
-    fail(400, `教程里没有「${kindLabels([kind])}」的提交位置：请在需要的地方单独一行插入 {{submit:${kind}}}，或关闭这个提交方式。`)
+    if (kind === 'learned') continue
+    const spec = specs.find(item => item.kind === kind)
+    if (!spec) {
+      fail(400, `教程里没有「${kindLabels([kind])}」的提交位置：请在需要的地方单独一行插入 `
+        + `{{submit:${kind}|这一题要交什么}}，或关闭这个提交方式。`)
+    }
+    if (!spec.prompt || spec.prompt.length < 4) {
+      fail(400, `「${kindLabels([kind])}」的提交框缺少说明：把标记写成 `
+        + `{{submit:${kind}|这一题要交什么}}，让学习者知道该交什么。`)
+    }
   }
 }
 

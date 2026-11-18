@@ -220,6 +220,7 @@ code { background: #f2edf8; border-radius: 4px; padding: 1px 4px; overflow-wrap:
 .saved { background: #e9f8ee; color: #286548; border-radius: 20px; font-size: 11px; padding: 2px 7px; }
 .saved.required { background: #fff0e2; color: #95500f; }
 .submit-hint { color: #8a5a1f; font-size: 12px; margin-top: 7px; }
+.submit-prompt { color: #463a58; font-size: 13px; line-height: 1.6; margin-bottom: 9px; padding-left: 9px; border-left: 3px solid #d9c9f2; }
 .locked-panel { display: grid; gap: 11px; justify-items: start; border: 1px dashed #ddd4e9; border-radius: var(--radius); background: #fbfafc; padding: 24px; color: #57506a; }
 .locked-panel svg { color: #8569b3; }
 .locked-panel p { font-size: 14px; }

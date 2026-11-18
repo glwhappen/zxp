@@ -1,13 +1,21 @@
 import { marked } from 'marked'
 
 export const submissionKinds = ['answer', 'screenshot', 'file']
-export const submissionMarker = kind => `{{submit:${kind}}}`
+// 提交框必须带说明：{{submit:answer|这一题要交什么}}；不写说明的旧写法只读兼容。
+export const submissionMarker = (kind, prompt = '') =>
+  prompt ? `{{submit:${kind}|${prompt}}}` : `{{submit:${kind}}}`
 export const askMarker = (question, options = []) =>
   `{{ask:${question}${options.length ? '|' + options.join(',') : ''}}}`
 
-function markerKind(token) {
+function markerSpec(token) {
   if (token.type !== 'paragraph') return
-  return /^\{\{submit:(answer|screenshot|file)\}\}$/.exec(token.raw.trim())?.[1]
+  const match = /^\{\{submit:(answer|screenshot|file)(?:\|([^\n}]+))?\}\}$/.exec(token.raw.trim())
+  if (!match) return
+  return { kind: match[1], prompt: (match[2] ?? '').trim().slice(0, 300) }
+}
+
+export function submissionSpecs(markdown) {
+  return marked.lexer(markdown).map(markerSpec).filter(Boolean)
 }
 
 // {{ask:问题}} 是文本框；{{ask:问题|选项1,选项2}} 是单选，前端自动补「其他」。
@@ -24,7 +32,7 @@ export function askField(token) {
 }
 
 export function hasSubmissionMarker(markdown, kind) {
-  return marked.lexer(markdown).some(token => markerKind(token) === kind)
+  return marked.lexer(markdown).some(token => markerSpec(token)?.kind === kind)
 }
 
 export function hasAskMarker(markdown, name) {
@@ -34,8 +42,8 @@ export function hasAskMarker(markdown, name) {
 export function layoutTutorial(markdown, kinds) {
   const tokens = marked.lexer(markdown)
   const markers = tokens.map(token => {
-    const kind = markerKind(token)
-    if (kind) return { kind }
+    const spec = markerSpec(token)
+    if (spec) return spec
     const field = askField(token)
     return field ? { field } : null
   })
@@ -52,7 +60,7 @@ export function layoutTutorial(markdown, kinds) {
         continue
       }
       const kind = slot.kind ?? slot
-      if (remaining.delete(kind)) blocks.push({ kind })
+      if (remaining.delete(kind)) blocks.push(slot.kind ? slot : { kind })
     }
   }
 

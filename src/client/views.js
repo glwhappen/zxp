@@ -138,7 +138,7 @@ export function stageStats(stage) {
       `<span>${esc(label)} <strong>${stage.stats[kind]}</strong></span>`).join('')}`
 }
 
-export function submission(stage, kind) {
+export function submission(stage, kind, prompt = '') {
   if (kind === 'learned') {
     const missing = stage.missing ?? []
     const blocked = !stage.learned && missing.length > 0
@@ -154,6 +154,7 @@ export function submission(stage, kind) {
   const [label, symbol] = methods[kind]
   const uploaded = `/api/stages/${key(stage.id)}/upload/${kind}`
   const title = `<div class="submit-title">${icon(symbol, 19)}<h3>${label}</h3>${required ? '<span class="saved required">必填</span>' : ''}${current ? '<span class="saved">已提交</span>' : ''}</div>`
+    + (prompt ? `<p class="submit-prompt">${esc(prompt)}</p>` : '')
     + (required && !current ? '<p class="submit-hint">这是必填提交，完成后才能标记学会了。</p>' : '')
   if (kind === 'answer') {
     return `<form class="submission" data-form="answer">${title}
@@ -170,8 +171,8 @@ export function submission(stage, kind) {
   </form>`
 }
 
-function submissionSlot(stage, kind) {
-  return `<div data-submission="${kind}">${submission(stage, kind)}</div>`
+function submissionSlot(stage, kind, prompt) {
+  return `<div data-submission="${kind}">${submission(stage, kind, prompt)}</div>`
 }
 
 // 教程里的 {{ask:问题}}：窄输入框；带选项时是单选，选「其他」再自己填。
@@ -208,7 +209,7 @@ function tutorialPanel(stage, signedIn) {
   }
 
   const { blocks } = layoutTutorial(stage.tutorial, kinds)
-  const content = blocks.map(block => block.kind ? submissionSlot(stage, block.kind)
+  const content = blocks.map(block => block.kind ? submissionSlot(stage, block.kind, block.prompt)
     : block.field ? askSlot(stage, block.field, signedIn) : `<div class="markdown">${DOMPurify.sanitize(block.html, {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea', 'style', 'iframe'],
@@ -388,6 +389,7 @@ export function stageEditor(stage, mode = 'stage') {
     <label>教程 <span class="subtle">支持 Markdown</span><textarea name="tutorial" rows="6" maxlength="35000" placeholder="练习步骤、示例和参考链接">${esc(stage?.tutorial)}</textarea></label>
     <div class="placement-tools">
       <p class="subtle" data-placement-status role="status">将光标放在练习题后，插入对应的提交框。</p>
+      <input data-submit-prompt maxlength="300" placeholder="这一题要交什么（写清：交什么、几条、什么格式）">
       <div class="inline-actions">${submissionKinds.filter(kind => !lesson || stage.methods.includes(kind))
         .map(kind => button('insert-submission', '插入' + methods[kind][0], 'btn', methods[kind][1], `data-kind="${kind}"`)).join('')}</div>
       <div class="ask-tools">
