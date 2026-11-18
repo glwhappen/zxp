@@ -3,5 +3,6 @@ dist/
 .wrangler/
 .sites-runtime/
 .env*
+!.env.example
 .dev.vars*
 *.zip

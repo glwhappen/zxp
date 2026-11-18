@@ -1,4 +1,5 @@
 import { fail, field, json, objectBody, requireUser, statement } from './core.js'
+import { getLoginSettings, oidcConfig } from './login-config.js'
 
 const COOKIE = 'workshop_session'
 const LIFETIME = 30 * 24 * 60 * 60
@@ -12,7 +13,7 @@ function secret() {
   return hex(crypto.getRandomValues(new Uint8Array(32)))
 }
 
-async function tokenHash(value) {
+export async function tokenHash(value) {
   return hex(await crypto.subtle.digest('SHA-256', encoder.encode(value)))
 }
 
@@ -34,53 +35,106 @@ function cookieToken(request) {
   return request.headers.get('Cookie')?.match(/(?:^|;\s*)workshop_session=([0-9a-f]{64})(?:;|$)/)?.[1]
 }
 
-function cookie(request, value, maxAge) {
+export function authCookie(request, name, value, maxAge, path = '/') {
   const secure = new URL(request.url).protocol === 'https:' ? '; Secure' : ''
-  return `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`
+  return `${name}=${value}; Path=${path}; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`
 }
 
-export async function identify(request, db, mcp = false) {
-  if (SITES_HOSTED) {
-    const id = request.headers.get('oai-authenticated-user-id')
-    if (!id) return null
-    const fullName = request.headers.get('oai-authenticated-user-full-name')
-    const email = request.headers.get('oai-authenticated-user-email')
-    let name = fullName || email || '学习者'
-    if (fullName && request.headers.get('oai-authenticated-user-full-name-encoding') === 'percent-encoded-utf-8') {
-      try { name = decodeURIComponent(fullName) } catch { name = email || '学习者' }
-    }
-    const user = { id: 'sites:' + id, name }
-    await statement(db, 'INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)', user.id, user.name).run()
-    return user
+const provisionedAccounts = new WeakMap()
+
+async function sitesUser(request, env) {
+  const id = request.headers.get('oai-authenticated-user-id')
+  if (!id) return null
+  const fullName = request.headers.get('oai-authenticated-user-full-name')
+  const email = request.headers.get('oai-authenticated-user-email')
+  let name = fullName || email || '学习者'
+  if (fullName && request.headers.get('oai-authenticated-user-full-name-encoding') === 'percent-encoded-utf-8') {
+    try { name = decodeURIComponent(fullName) } catch { name = email || '学习者' }
   }
+  const isAdmin = Boolean(email && email.toLowerCase() === env.ZXP_ADMIN_CHATGPT_EMAIL?.trim().toLowerCase())
+  const user = { id: 'sites:' + id, name, provider: 'chatgpt', isAdmin }
+  let known = provisionedAccounts.get(env.DB)
+  if (!known) provisionedAccounts.set(env.DB, known = new Set())
+  if (!known.has(user.id)) {
+    await statement(env.DB, 'INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)', user.id, user.name).run()
+    if (known.size >= 128) known.delete(known.values().next().value)
+    known.add(user.id)
+  }
+  return user
+}
+
+export async function identify(request, env, { settings, mcp = false } = {}) {
+  const { DB: db } = env
+  const { methods } = settings ?? await getLoginSettings(env)
 
   if (mcp) {
+    if (SITES_HOSTED) return methods.chatgpt ? sitesUser(request, env) : null
     const token = request.headers.get('Authorization')?.match(/^Bearer (sw_[0-9a-f]{64})$/)?.[1]
     if (!token) return null
     return statement(db, 'SELECT id, name FROM users WHERE token_hash = ?', await tokenHash(token)).first()
   }
 
   const token = cookieToken(request)
-  if (!token) return null
-  return statement(db, `
-    SELECT u.id, u.name FROM sessions s JOIN users u ON u.id = s.user_id
-    WHERE s.token_hash = ? AND s.expires_at > ?
-  `, await tokenHash(token), Date.now()).first()
+  if (token) {
+    const user = await statement(db, `
+      SELECT u.id, u.name, o.issuer, o.subject FROM sessions s JOIN users u ON u.id = s.user_id
+      LEFT JOIN oidc_accounts o ON o.user_id = u.id
+      WHERE s.token_hash = ? AND s.expires_at > ?
+    `, await tokenHash(token), Date.now()).first()
+    const provider = user?.issuer ? 'oidc' : 'password'
+    if (user && methods[provider]) {
+      const oidc = provider === 'oidc' ? oidcConfig(env) : null
+      if (provider === 'password' || user.issuer === oidc?.issuer) {
+        const isAdmin = oidc ? user.subject === env.ZXP_ADMIN_OIDC_SUB?.trim()
+          : user.id === env.ZXP_ADMIN_LOCAL_USER_ID?.trim()
+        return { id: user.id, name: user.name, provider, isAdmin, ...(oidc ? { oidcSubject: user.subject } : {}) }
+      }
+    }
+  }
+  return methods.chatgpt && SITES_HOSTED ? sitesUser(request, env) : null
 }
 
-export async function authenticate(request, db, action) {
-  if (SITES_HOSTED) fail(404, '请使用 ChatGPT 账号登录。')
+export async function startSession(request, db, id) {
+  const token = secret()
+  const previous = cookieToken(request)
+  const now = Date.now()
+  const queries = [
+    statement(db, 'DELETE FROM sessions WHERE expires_at <= ?', now),
+    statement(db, 'INSERT INTO sessions VALUES (?, ?, ?)', await tokenHash(token), id, now + LIFETIME * 1000),
+  ]
+  if (previous) queries.push(statement(db, 'DELETE FROM sessions WHERE token_hash = ?', await tokenHash(previous)))
+  await db.batch(queries)
+  return authCookie(request, COOKIE, token, LIFETIME)
+}
+
+async function countPasswordAttempt(db, username) {
+  const now = Date.now()
+  const [, result] = await db.batch([
+    statement(db, 'DELETE FROM password_attempts WHERE expires_at <= ?', now),
+    statement(db, `
+      INSERT INTO password_attempts (username, expires_at, attempts) VALUES (?, ?, 1)
+      ON CONFLICT(username) DO UPDATE SET attempts = password_attempts.attempts + 1
+      RETURNING attempts
+    `, username, now + 15 * 60 * 1000),
+  ])
+  if (result.results[0].attempts > 12) fail(429, '尝试次数过多，请稍后重试。')
+}
+
+export async function authenticate(request, env, action, settings) {
+  const db = env.DB
   if (action === 'logout') {
     const token = cookieToken(request)
     if (token) await statement(db, 'DELETE FROM sessions WHERE token_hash = ?', await tokenHash(token)).run()
-    return json({ ok: true }, 200, { 'Set-Cookie': cookie(request, '', 0) })
+    return json({ ok: true }, 200, { 'Set-Cookie': authCookie(request, COOKIE, '', 0) })
   }
+  if (!settings.methods.password) fail(403, '用户名和密码登录已关闭。')
   const data = await objectBody(request, 4096)
   const username = field(data.username, '用户名', 32).toLowerCase()
   if (!/^[a-z0-9_-]{3,32}$/.test(username)) fail(400, '用户名为 3–32 个字母、数字、下划线或短横线。')
   if (typeof data.password !== 'string' || data.password.length < 8 || data.password.length > 128) {
     fail(400, '密码长度须为 8–128 个字符。')
   }
+  await countPasswordAttempt(db, username)
   let user = await statement(db, 'SELECT id, name, password_hash FROM users WHERE username = ?', username).first()
   if (action === 'register') {
     if (user) fail(409, '该用户名已被使用。')
@@ -96,12 +150,10 @@ export async function authenticate(request, db, action) {
     const computed = await passwordHash(data.password, stored.split(':')[0] || 'invalid-user')
     if (!equal(computed, stored)) fail(401, '用户名或密码错误。')
   }
-  const token = secret()
-  await db.batch([
-    statement(db, 'DELETE FROM sessions WHERE expires_at <= ?', Date.now()),
-    statement(db, 'INSERT INTO sessions VALUES (?, ?, ?)', await tokenHash(token), user.id, Date.now() + LIFETIME * 1000),
-  ])
-  return json({ user: { id: user.id, name: user.name } }, 200, { 'Set-Cookie': cookie(request, token, LIFETIME) })
+  await statement(db, 'DELETE FROM password_attempts WHERE username = ?', username).run()
+  return json({ user: { id: user.id, name: user.name, provider: 'password',
+    isAdmin: user.id === env.ZXP_ADMIN_LOCAL_USER_ID?.trim() } }, 200,
+  { 'Set-Cookie': await startSession(request, db, user.id) })
 }
 
 export async function manageToken(db, user, action) {

@@ -16,7 +16,7 @@ function bools(item) {
 // completedCount 只统计「标记学会且必填项都已提交」的关卡。
 const courseSelect = `
   SELECT c.id, c.title, c.description, c.category, c.theme, c.visibility, u.name AS author,
-    c.owner_id = ? AS owned, c.updated_at,
+    c.owner_id = ? AS owned, c.updated_at, c.moderated_at,
     EXISTS(SELECT 1 FROM enrollments e WHERE e.course_id = c.id AND e.user_id = ?) AS joined,
     (SELECT COUNT(*) FROM course_stages cs WHERE cs.course_id = c.id) AS stageCount,
     (SELECT COUNT(*) FROM course_stages cs JOIN progress p ON p.stage_id = cs.stage_id
@@ -29,12 +29,14 @@ const courseSelect = `
   FROM courses c JOIN users u ON u.id = c.owner_id
 `
 
+const publicCourse = "(c.visibility = 'public' AND c.moderated_at IS NULL)"
+
 export async function listCourses(db, user, scope = 'public') {
   const id = user?.id ?? ''
   const where = {
-    public: "c.visibility = 'public' AND ? IS NOT NULL",
+    public: `${publicCourse} AND ? IS NOT NULL`,
     owned: 'c.owner_id = ?',
-    joined: "(c.visibility = 'public' OR c.owner_id = ?) AND EXISTS (SELECT 1 FROM enrollments WHERE course_id = c.id AND user_id = ?)",
+    joined: `(${publicCourse} OR c.owner_id = ?) AND EXISTS (SELECT 1 FROM enrollments WHERE course_id = c.id AND user_id = ?)`,
   }
   if (!Object.hasOwn(where, scope)) fail(400, '课程范围无效。')
   const params = scope === 'joined' ? [id, id] : [id]
@@ -44,18 +46,20 @@ export async function listCourses(db, user, scope = 'public') {
 
 export async function courseDetail(db, user, courseId) {
   const id = user?.id ?? ''
-  const record = await statement(db, courseSelect + `
-    WHERE c.id = ? AND (c.visibility = 'public' OR c.owner_id = ?)
-  `, id, id, id, id, courseId, id).first()
+  const [courseResult, stageResult] = await db.batch([
+    statement(db, courseSelect + ` WHERE c.id = ? AND (${publicCourse} OR c.owner_id = ?)`, id, id, id, id, courseId, id),
+    statement(db, `
+      SELECT s.id, s.title, s.task, s.visibility, s.methods, s.required, cs.requires,
+        EXISTS(SELECT 1 FROM progress p WHERE p.stage_id = s.id AND p.user_id = ?) AS marked,
+        (SELECT json_group_array(kind) FROM submissions sub WHERE sub.stage_id = s.id AND sub.user_id = ?) AS submitted
+      FROM course_stages cs JOIN stages s ON s.id = cs.stage_id JOIN courses c ON c.id = cs.course_id
+      WHERE cs.course_id = ? AND (${publicCourse} OR c.owner_id = ?) ORDER BY cs.position
+    `, id, id, courseId, id),
+  ])
+  const record = courseResult.results[0]
   if (!record) fail(404, '课程不存在或当前账号无权访问。')
   const course = bools(record)
-  const entries = await rows(statement(db, `
-    SELECT s.id, s.title, s.task, s.visibility, s.methods, s.required, cs.requires,
-      EXISTS(SELECT 1 FROM progress p WHERE p.stage_id = s.id AND p.user_id = ?) AS marked,
-      (SELECT json_group_array(kind) FROM submissions sub WHERE sub.stage_id = s.id AND sub.user_id = ?) AS submitted
-    FROM course_stages cs JOIN stages s ON s.id = cs.stage_id
-    WHERE cs.course_id = ? ORDER BY cs.position
-  `, id, id, courseId))
+  const entries = stageResult.results
   const known = new Set(entries.map(entry => entry.id))
   const stages = entries.map(entry => {
     const methods = enabledMethods(entry.methods)
@@ -93,23 +97,30 @@ export async function listStages(db, user, scope = 'available') {
   return list.map(stage => ({ ...stage, owned: Boolean(stage.owned) }))
 }
 
-export async function readableStage(db, user, stageId) {
+function stageQuery(db, user, stageId) {
   const id = user?.id ?? ''
-  const stage = await statement(db, `
+  return statement(db, `
     SELECT s.id, s.title, s.task, s.tutorial, s.visibility, s.methods, s.required,
       s.owner_id = ? AS owned, u.name AS author
     FROM stages s JOIN users u ON u.id = s.owner_id
     WHERE s.id = ? AND (s.visibility = 'public' OR s.owner_id = ?)
-  `, id, stageId, id).first()
+  `, id, stageId, id)
+}
+
+function stageData(stage) {
   if (!stage) fail(404, '关卡不存在或当前账号无权访问。')
   const methods = enabledMethods(stage.methods)
   return { ...stage, owned: Boolean(stage.owned), methods, required: requiredMethods(stage.required, methods) }
 }
 
+export async function readableStage(db, user, stageId) {
+  return stageData(await stageQuery(db, user, stageId).first())
+}
+
 export async function stageDetail(db, user, stageId) {
-  const stage = await readableStage(db, user, stageId)
   const id = user?.id ?? ''
-  const [counts, submissions] = await db.batch([
+  const [stageResult, counts, submissions] = await db.batch([
+    stageQuery(db, user, stageId),
     statement(db, `
       SELECT
         (SELECT COUNT(*) FROM progress WHERE stage_id = ?1) AS learned,
@@ -127,6 +138,7 @@ export async function stageDetail(db, user, stageId) {
       SELECT kind, answer, filename, updated_at FROM submissions WHERE stage_id = ? AND user_id = ?
     `, stageId, id),
   ])
+  const stage = stageData(stageResult.results[0])
   const { myLearned, ...stats } = counts.results[0]
   const missing = missingRequired(stage.required, submissions.results.map(entry => entry.kind))
   return { ...stage, learned: Boolean(myLearned) && !missing.length, stats, submissions: submissions.results, missing }
@@ -235,7 +247,7 @@ export async function joinCourse(db, user, courseId) {
   await courseDetail(db, user, courseId)
   await statement(db, `
     INSERT OR IGNORE INTO enrollments (course_id, user_id)
-    SELECT id, ? FROM courses WHERE id = ? AND (visibility = 'public' OR owner_id = ?)
+    SELECT c.id, ? FROM courses c WHERE c.id = ? AND (${publicCourse} OR c.owner_id = ?)
   `, id, courseId, id).run()
   return courseDetail(db, user, courseId)
 }
@@ -245,7 +257,7 @@ export async function joinFromStage(db, user, courseId, stageId) {
   await statement(db, `
     INSERT OR IGNORE INTO enrollments (course_id, user_id)
     SELECT c.id, ?1 FROM courses c JOIN course_stages cs ON cs.course_id = c.id
-    WHERE c.id = ?2 AND cs.stage_id = ?3 AND (c.visibility = 'public' OR c.owner_id = ?1)
+    WHERE c.id = ?2 AND cs.stage_id = ?3 AND (${publicCourse} OR c.owner_id = ?1)
   `, user.id, courseId, stageId).run()
 }
 

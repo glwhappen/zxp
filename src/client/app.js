@@ -1,4 +1,6 @@
 import { icon } from './icons.js'
+import { adminPage, providerNames } from './admin.js'
+import { createViewCache } from './view-cache.js'
 import { hasSubmissionMarker, submissionKinds, submissionMarker } from './tutorial.js'
 import {
   button, card, categories, courseEditor, coursePage, coursePath, esc, hero, key, link, note, outline,
@@ -10,10 +12,15 @@ const sidebar = document.querySelector('#sidebar')
 const topbar = document.querySelector('#topbar')
 const dialog = document.querySelector('#dialog')
 const toast = document.querySelector('#toast')
+const navigationProgress = document.querySelector('#navigation-progress')
 const productName = '知行谱'
-const state = { user: null, hosted: false, path: '', category: '', query: '', current: null, editor: null }
+const state = { user: null, hosted: false, login: { methods: {} }, path: '', category: '', query: '', current: null, editor: null }
 let navigation = 0
 let toastTimeout
+let shellIdentity
+let identityRevision = 0
+const views = createViewCache(path => api('view?path=' + key(path)))
+const accountEvents = typeof BroadcastChannel === 'function' ? new BroadcastChannel('zxp-account') : null
 
 class ApiError extends Error {
   constructor(status, message) {
@@ -33,6 +40,27 @@ async function api(path, options = {}) {
   return data
 }
 
+async function refreshIdentity() {
+  const revision = identityRevision
+  const profile = await api('me')
+  if (revision === identityRevision) applyProfile(profile)
+}
+
+function applyProfile(profile) {
+  views.acceptIdentity(profile.user?.id ?? null)
+  Object.assign(state, profile)
+}
+
+function cachePage(path, view) {
+  views.put(path, { view, profile: { user: state.user, hosted: state.hosted, login: state.login } })
+}
+
+function accountChanged() {
+  identityRevision++
+  views.invalidate()
+  accountEvents?.postMessage('changed')
+}
+
 function announce(message, error = false) {
   toast.className = error ? 'toast error' : 'toast'
   toast.innerHTML = `${icon(error ? 'close' : 'check', 16)} ${esc(message)}`
@@ -48,20 +76,24 @@ function showDialog(title, body, wide = false) {
 }
 
 function login(mode = 'login') {
-  if (state.hosted) {
-    const returnTo = /^\/(?!\/)/.test(location.pathname) ? location.pathname : '/'
-    showDialog(`登录${productName}`, `<p>使用 ChatGPT 账号保存你的学习进度、提交作业和创建课程。</p>
-      <a class="btn primary" href="/signin-with-chatgpt?return_to=${key(returnTo)}" target="_top">使用 ChatGPT 登录</a>`)
-    return
-  }
+  const { methods, oidcLabel } = state.login
+  const returnTo = key(/^\/(?!\/)/.test(location.pathname) ? location.pathname + location.search : '/')
+  const providers = `<div class="login-providers">
+    ${methods.chatgpt ? `<a class="btn" href="/signin-with-chatgpt?return_to=${returnTo}" target="_top">使用 ChatGPT 登录</a>` : ''}
+    ${methods.oidc ? `<a class="btn ${methods.password ? '' : 'primary'}" href="/api/auth/oidc/start?return_to=${returnTo}" target="_top">${esc(oidcLabel)}</a>` : ''}
+  </div>`
+  const hasProviders = methods.chatgpt || methods.oidc
   const register = mode === 'register'
-  showDialog(register ? '创建账号' : `登录${productName}`, `<form data-form="auth" data-mode="${mode}">
+  showDialog(register ? '创建账号' : `登录${productName}`, `
+    ${hasProviders ? providers : ''}
+    ${methods.password ? `<form data-form="auth" data-mode="${mode}">
     ${register ? '<label>昵称<input name="name" maxlength="40" autocomplete="nickname" required></label>' : ''}
     <label>用户名<input name="username" autocomplete="username" minlength="3" maxlength="32" required></label>
     <label>密码<input name="password" type="password" minlength="8" maxlength="128" autocomplete="${register ? 'new-password' : 'current-password'}" required></label>
     <div class="form-error" role="alert" hidden></div><div class="submit-row">
       ${button(register ? 'login' : 'register', register ? '已有账号，去登录' : '没有账号，去注册', 'text-btn')}
-      <button class="btn primary">${register ? '注册' : '登录'}</button></div></form>`)
+      <button class="btn primary">${register ? '注册' : '登录'}</button></div></form>` : ''}
+    ${!hasProviders && !methods.password ? '<p>当前没有可用的登录方式。请联系站点管理员。</p>' : ''}`)
   dialog.querySelector('input')?.focus()
 }
 
@@ -73,9 +105,14 @@ function requireLogin() {
 
 function account() {
   if (!requireLogin()) return
+  const alternatives = Object.keys(state.login.methods).some(key => state.login.methods[key] && key !== state.user.provider)
   showDialog('我的账号', `<p class="account-name"><span class="avatar">${esc(state.user.name.slice(0, 1))}</span> ${esc(state.user.name)}</p>
-    ${state.hosted ? '<a class="btn" href="/signout-with-chatgpt?return_to=%2F" target="_top">退出登录</a>'
-      : button('logout', '退出登录')}`)
+    <p class="subtle">${esc(providerNames[state.user.provider])} · 账号 ID <code>${esc(state.user.id)}</code></p>
+    ${state.user.oidcSubject ? `<p class="subtle account-id">OIDC Subject <code>${esc(state.user.oidcSubject)}</code></p>` : ''}
+    <div class="inline-actions">${state.user.isAdmin ? link('/admin', '管理后台', 'btn', 'lock') : ''}
+      ${alternatives ? button('login', '切换登录方式') : ''}
+      ${state.user.provider === 'chatgpt' ? '<a class="btn" href="/signout-with-chatgpt?return_to=%2F" target="_top">退出登录</a>'
+        : button('logout', '退出登录')}</div>`)
 }
 
 function showMcp() {
@@ -91,14 +128,34 @@ function showMcp() {
     <div data-token-result></div>`)
 }
 
+function activeNav() {
+  return state.path === '/' || /^\/course\/[^/]+(?:\/stage\/[^/]+)?$/.test(state.path)
+    ? '/' : state.path.startsWith('/stage/') ? '/stages'
+      : state.path.startsWith('/course/') ? '/owned' : state.path
+}
+
 function paintShell() {
+  const identity = JSON.stringify([state.user?.id, state.user?.name, state.user?.isAdmin])
+  const active = activeNav()
+  if (identity === shellIdentity) {
+    for (const item of sidebar.querySelectorAll('nav a')) {
+      const selected = item.pathname === active
+      item.classList.toggle('active', selected)
+      if (selected) item.setAttribute('aria-current', 'page')
+      else item.removeAttribute('aria-current')
+    }
+    const menu = topbar.querySelector('[data-action="menu"]')
+    menu?.setAttribute('aria-expanded', String(document.body.classList.contains('menu-open')))
+    const search = topbar.querySelector('input[name="query"]')
+    if (search && search.value !== state.query) search.value = state.query
+    return
+  }
+  shellIdentity = identity
   const sections = [
     ['学习', [['/', '探索课程', 'compass'], ['/learning', '我的学习', 'book']]],
     ['创作', [['/owned', '我的创作', 'grid'], ['/stages', '关卡库', 'layers']]],
   ]
-  const active = state.path === '/' || /^\/course\/[^/]+(?:\/stage\/[^/]+)?$/.test(state.path)
-    ? '/' : state.path.startsWith('/stage/') ? '/stages'
-      : state.path.startsWith('/course/') ? '/owned' : state.path
+  if (state.user?.isAdmin) sections.push(['管理', [['/admin', '管理后台', 'lock']]])
   sidebar.innerHTML = `<a class="brand" href="/" data-link><span class="brand-icon">${icon('logo', 23)}</span>
     <span><strong>${productName}</strong><small>ZXP</small></span></a>
     <nav aria-label="主要导航">${sections.map(([heading, links]) => `<div class="nav-group"><div class="nav-title">${heading}</div>
@@ -161,72 +218,112 @@ function stagesPage(stages) {
       ${icon('arrow', 16)}</a>`).join('') || note('还没有可用关卡。')}</div>`
 }
 
-async function navigate(path = location.pathname, push = false) {
-  if (push && path !== location.pathname) history.pushState({}, '', path)
-  const version = ++navigation
+function paintView({ profile, view }, path) {
+  applyProfile(profile)
   state.path = path
   state.current = null
   state.editor = null
   document.body.classList.remove('menu-open')
   if (dialog.open) dialog.close()
   paintShell()
-  main.innerHTML = '<p class="loading">正在加载…</p>'
-  window.scrollTo(0, 0)
-  try {
-    const parts = path.split('/').filter(Boolean).map(decodeURIComponent)
-    if (!parts.length) {
-      const courses = await api('courses')
-      if (version !== navigation) return
-      state.current = { courses }
-      paintExplore(courses)
-    } else if (['learning', 'owned'].includes(parts[0]) && parts.length === 1) {
-      const scope = parts[0] === 'owned' ? 'owned' : 'joined'
-      const courses = state.user ? await api('courses?scope=' + scope) : []
-      if (version !== navigation) return
-      courseShelf(courses, scope)
-    } else if (parts[0] === 'stages' && parts.length === 1) {
-      const stages = await api('stages')
-      if (version !== navigation) return
-      stagesPage(stages)
-    } else if (path === '/course/new' || (parts[0] === 'course' && parts[2] === 'edit' && parts.length === 3)) {
-      if (!state.user) {
-        main.innerHTML = `<div class="sign-in-panel">${note('登录后可以创建和编辑课程。', 'lock')}${button('login', '登录', 'btn primary')}</div>`
-        return
-      }
-      const [course, available] = await Promise.all([
-        path === '/course/new' ? null : api('courses/' + key(parts[1])),
-        api('stages'),
-      ])
-      if (version !== navigation) return
-      if (course && !course.owned) throw new Error('只有课程作者可以编辑课程。')
+  switch (view.type) {
+    case 'explore':
+      state.current = { courses: view.courses }
+      paintExplore(view.courses)
+      break
+    case 'shelf': courseShelf(view.courses, view.scope); break
+    case 'library': stagesPage(view.stages); break
+    case 'editor':
       state.editor = {
-        course, available,
-        ids: course?.stages.map(stage => stage.id) ?? [],
-        requires: Object.fromEntries((course?.stages ?? []).map(stage => [stage.id, stage.requires ?? []])),
+        course: view.course, available: view.available,
+        ids: view.course?.stages.map(stage => stage.id) ?? [],
+        requires: Object.fromEntries((view.course?.stages ?? []).map(stage => [stage.id, stage.requires ?? []])),
       }
       main.innerHTML = courseEditor(state.editor)
-    } else if (parts[0] === 'course' && parts.length === 2) {
-      const course = await api('courses/' + key(parts[1]))
-      if (version !== navigation) return
-      state.current = { course }
-      main.innerHTML = coursePage(course, state.user)
-    } else if ((parts[0] === 'stage' && parts.length === 2) ||
-        (parts[0] === 'course' && parts[2] === 'stage' && parts.length === 4)) {
-      const [course, stage] = await Promise.all([
-        parts.length === 4 ? api('courses/' + key(parts[1])) : null,
-        api('stages/' + key(parts.at(-1))),
-      ])
-      if (version !== navigation) return
-      if (course && !course.stages.some(item => item.id === stage.id)) throw new Error('这门课程未引用该关卡。')
-      state.current = { course, stage }
-      main.innerHTML = stagePage(stage, course, course?.stages.find(item => item.id === stage.id))
+      break
+    case 'course':
+      state.current = { course: view.course }
+      main.innerHTML = coursePage(view.course, state.user)
+      break
+    case 'stage':
+      state.current = { course: view.course, stage: view.stage, userId: state.user?.id }
+      if (view.course && !views.read(coursePath(view.course.id))) {
+        cachePage(coursePath(view.course.id), { type: 'course', course: view.course })
+      }
+      main.innerHTML = stagePage(view.stage, view.course, view.course?.stages.find(item => item.id === view.stage.id))
+      break
+    case 'admin':
+      state.current = { admin: view.admin }
+      main.innerHTML = adminPage(view.admin)
+      break
+    case 'sign-in':
+      main.innerHTML = `<div class="sign-in-panel">${note(view.message, 'lock')}${button('login', '登录', 'btn primary')}</div>`
+      break
+    case 'error':
+      main.innerHTML = `<div class="sign-in-panel">${note(view.message, 'close')}${link('/', '返回课程首页')}</div>`
+      break
+  }
+  document.title = `${main.querySelector('h1')?.textContent ?? '学习'} · ${productName}`
+}
+
+function warmView(path) {
+  if (navigator.connection?.saveData || !path || path === state.path || views.read(path)?.fresh) return
+  if (!/^\/(?:learning|owned|stages|stage\/[^/]+|course\/(?!new$)[^/]+(?:\/stage\/[^/]+)?)?$/.test(path)) return
+  views.load(path).catch(() => {})
+}
+
+function warmNext(view, version) {
+  if (!view.course?.stages.length) return
+  const stages = view.course.stages
+  const index = view.stage ? stages.findIndex(stage => stage.id === view.stage.id) : -1
+  const next = view.stage
+    ? stages[index + 1] : stages.find(stage => !stage.learned) ?? stages[0]
+  if (!next) return
+  setTimeout(() => {
+    if (version === navigation) warmView(stagePath(next.id, view.course))
+  }, 120)
+}
+
+function refreshView(path, version) {
+  views.load(path).then(data => {
+    if (!data || version !== navigation || path !== state.path) return
+    const identityChanged = state.user?.id !== data.profile.user?.id
+    if (identityChanged || data.view.type === 'error') {
+      paintView(data, path)
+    } else if (['explore', 'shelf', 'library'].includes(data.view.type) && !dialog.open &&
+      !main.contains(document.activeElement)) {
+      paintView(data, path)
     } else {
-      throw new Error('页面不存在。')
+      applyProfile(data.profile)
+      paintShell()
     }
-    document.title = `${main.querySelector('h1')?.textContent ?? '学习'} · ${productName}`
+  }).catch(() => {})
+}
+
+async function navigate(path = location.pathname, push = false, focus = false) {
+  const version = ++navigation
+  const cached = views.read(path)
+  navigationProgress.hidden = true
+  const showProgress = !cached && setTimeout(() => {
+    if (version === navigation) navigationProgress.hidden = false
+  }, 130)
+  try {
+    let data = cached?.data
+    while (!data && version === navigation) data = await views.load(path)
+    if (version !== navigation) return
+    if (push && path !== location.pathname) history.pushState({}, '', path)
+    paintView(data, path)
+    window.scrollTo(0, 0)
+    if (focus) main.focus({ preventScroll: true })
+    if (cached && !cached.fresh) refreshView(path, version)
+    warmNext(data.view, version)
   } catch (error) {
     if (version !== navigation) return
-    main.innerHTML = `<div class="sign-in-panel">${note(error.message, 'close')}${link('/', '返回课程首页')}</div>`
+    if (state.path && push) announce(error.message, true)
+    else main.innerHTML = `<div class="sign-in-panel">${note(error.message, 'close')}${button('retry-view', '重试')}</div>`
+  } finally {
+    clearTimeout(showProgress)
+    if (version === navigation) navigationProgress.hidden = true
   }
 }
 
@@ -277,7 +374,36 @@ function chooseStageDialog() {
       ${visibility(stage.visibility)}${icon('plus', 17)}</button>`).join('') || note('没有更多可引用的关卡。')}</div>`, true)
 }
 
+function syncCourseProgress(course, stage, joinedCourseId) {
+  const step = course?.stages.find(item => item.id === stage.id)
+  if (!step) return
+  step.learned = stage.learned
+  course.completedCount = course.stages.filter(item => item.learned).length
+  if (course.id === joinedCourseId && !course.joined) {
+    course.joined = true
+    course.learnerCount++
+  }
+}
+
+// 必填项与前置依赖会随提交或撤销变化，同步到缓存视图里的同一关卡和整门课。
+function syncStageRules(course, stage) {
+  const entry = course?.stages.find(item => item.id === stage.id)
+  if (!entry) return
+  Object.assign(entry, { required: stage.required, missing: stage.missing })
+  recomputeLocks(course)
+}
+
 function applyStage(stage, kind, context) {
+  if (context.userId !== state.user?.id) return
+  const joinedCourseId = kind !== 'learned' || stage.learned ? context.course?.id : null
+  const changesEnrollment = joinedCourseId && !context.course.joined
+  views.invalidate((path, view) => (view.type === 'shelf' && (view.scope === 'joined' || changesEnrollment))
+    || (changesEnrollment && view.type === 'explore'))
+  views.update(view => {
+    if (view.stage?.id === stage.id) view.stage = stage
+    syncCourseProgress(view.course, stage, joinedCourseId)
+    syncStageRules(view.course, stage)
+  })
   if (context !== state.current) return
   context.stage = stage
   main.querySelector('[data-stage-stats]').innerHTML = stageStats(stage)
@@ -288,10 +414,8 @@ function applyStage(stage, kind, context) {
   if (kind !== 'learned') main.querySelector('[data-submission="learned"]').innerHTML = submission(stage, 'learned')
   if (context.course) {
     const { course } = context
-    const entry = course.stages.find(item => item.id === stage.id)
-    Object.assign(entry, { learned: stage.learned, required: stage.required, missing: stage.missing })
-    course.completedCount = course.stages.filter(item => item.learned).length
-    recomputeLocks(course)
+    syncCourseProgress(course, stage, joinedCourseId)
+    syncStageRules(course, stage)
     main.querySelector('[data-outline]').innerHTML = progress(course) + outline(course, stage.id)
   }
 }
@@ -303,11 +427,27 @@ async function handleAction(control) {
     case 'login':
     case 'register': login(action); break
     case 'account': account(); break
+    case 'retry-view': await navigate(); break
     case 'logout':
       await api('auth/logout', { method: 'POST' })
-      state.user = null
+      accountChanged()
       await navigate('/', true)
       break
+    case 'admin-course': {
+      const admin = state.current.admin
+      const hidden = control.dataset.hidden === 'true'
+      const updated = await api('admin/courses/' + key(id), { method: 'PUT', body: { hidden } })
+      views.invalidate()
+      if (state.current?.admin !== admin) break
+      admin.courses.find(course => course.id === id).moderated_at = updated.moderated_at
+      const row = control.closest('tr')
+      row.cells[1].textContent = hidden ? '已下架'
+        : admin.courses.find(course => course.id === id).visibility === 'public' ? '公开' : '私有'
+      control.dataset.hidden = String(!hidden)
+      control.textContent = hidden ? '恢复' : '下架'
+      announce(hidden ? '课程已下架。' : '课程已恢复。')
+      break
+    }
     case 'menu': {
       const opened = document.body.classList.toggle('menu-open')
       control.setAttribute('aria-expanded', String(opened))
@@ -337,9 +477,15 @@ async function handleAction(control) {
       break
     case 'join':
       if (requireLogin()) {
-        const { course } = state.current
-        await api('courses/' + key(course.id) + '/join', { method: 'POST' })
-        await navigate()
+        const context = state.current
+        const saved = await api('courses/' + key(context.course.id) + '/join', { method: 'POST' })
+        views.invalidate((path, view) => view.type === 'explore' || view.type === 'shelf')
+        views.update(view => {
+          if (view.course?.id === saved.id) view.course = saved
+        })
+        const path = coursePath(saved.id)
+        cachePage(path, { type: 'course', course: saved })
+        if (context === state.current) await navigate(path)
         announce('已加入我的学习。')
       }
       break
@@ -424,10 +570,28 @@ async function handleForm(form) {
       else paintExplore(state.current.courses)
       break
     case 'auth': {
-      const result = await api('auth/' + form.dataset.mode, { method: 'POST', body })
-      state.user = result.user
+      await api('auth/' + form.dataset.mode, { method: 'POST', body })
+      accountChanged()
       await navigate()
       announce('已登录。')
+      break
+    }
+    case 'admin-login': {
+      const methods = Object.fromEntries(['chatgpt', 'password', 'oidc'].map(key => [key, data.has(key)]))
+      await api('admin/login-methods', { method: 'PUT', body: methods })
+      accountChanged()
+      await refreshIdentity()
+      if (!state.user?.isAdmin) await navigate('/', true)
+      announce('登录方式已更新。')
+      break
+    }
+    case 'admin-search': {
+      const version = navigation
+      const admin = await api('admin?q=' + key(data.get('q')))
+      if (version !== navigation) break
+      state.current = { admin }
+      main.innerHTML = adminPage(admin)
+      main.querySelector('input[name="q"]').focus({ preventScroll: true })
       break
     }
     case 'course': {
@@ -435,7 +599,10 @@ async function handleForm(form) {
       const saved = await api('courses' + (course ? '/' + key(course.id) : ''), {
         method: course ? 'PUT' : 'POST', body: { ...body, stageIds: ids, requires },
       })
-      await navigate(coursePath(saved.id), true)
+      const path = coursePath(saved.id)
+      views.invalidate()
+      cachePage(path, { type: 'course', course: saved })
+      await navigate(path, true)
       announce(course ? '课程已保存。' : '课程已创建。')
       break
     }
@@ -454,6 +621,8 @@ async function handleForm(form) {
         method: id ? 'PUT' : 'POST',
         body: { ...body, methods: data.getAll('methods'), required: data.getAll('required') },
       })
+      views.invalidate()
+      cachePage(stagePath(saved.id), { type: 'stage', course: null, stage: saved })
       dialog.close()
       if (!state.editor) {
         await navigate(id && state.current?.stage?.id === id ? state.path : stagePath(saved.id), true)
@@ -490,6 +659,24 @@ async function handleForm(form) {
   }
 }
 
+let hoverTimer
+document.addEventListener('pointerover', event => {
+  const target = event.target.closest('a[data-link]')
+  if (!target || target.contains(event.relatedTarget)) return
+  clearTimeout(hoverTimer)
+  hoverTimer = setTimeout(() => warmView(target.pathname), 85)
+})
+document.addEventListener('pointerout', event => {
+  const target = event.target.closest('a[data-link]')
+  if (target && !target.contains(event.relatedTarget)) clearTimeout(hoverTimer)
+})
+for (const type of ['focusin', 'pointerdown']) {
+  document.addEventListener(type, event => {
+    const target = event.target.closest('a[data-link]')
+    if (target) warmView(target.pathname)
+  })
+}
+
 document.addEventListener('click', async event => {
   const link = event.target.closest('a[data-link]')
   if (link && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
@@ -498,8 +685,7 @@ document.addEventListener('click', async event => {
       state.query = ''
       state.category = ''
     }
-    await navigate(link.pathname, true)
-    main.focus({ preventScroll: true })
+    await navigate(link.pathname, true, true)
     return
   }
   const control = event.target.closest('[data-action]')
@@ -560,11 +746,28 @@ dialog.addEventListener('click', event => {
   if (event.target === dialog) dialog.close()
 })
 window.addEventListener('popstate', () => navigate())
+accountEvents?.addEventListener('message', () => {
+  identityRevision++
+  views.invalidate()
+  navigate()
+})
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return
+  const user = state.user?.id
+  refreshIdentity().then(() => {
+    if (user !== state.user?.id) navigate()
+    else paintShell()
+  }).catch(() => {})
+})
 try {
-  const { user, hosted } = await api('me')
-  state.user = user
-  state.hosted = hosted
+  paintShell()
   await navigate()
+  const url = new URL(location.href)
+  if (url.searchParams.get('auth_error') === 'oidc') {
+    url.searchParams.delete('auth_error')
+    history.replaceState({}, '', url)
+    announce('OIDC 登录未完成，请重试。', true)
+  }
 } catch (error) {
   paintShell()
   main.innerHTML = note(error.message, 'close')

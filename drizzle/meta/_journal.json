@@ -3,6 +3,7 @@
   "dialect": "sqlite",
   "entries": [
     { "idx": 0, "version": "6", "when": 1794960000000, "tag": "0000_initial", "breakpoints": true },
-    { "idx": 1, "version": "6", "when": 1795046400000, "tag": "0001_required_and_dependencies", "breakpoints": true }
+    { "idx": 1, "version": "6", "when": 1795017600000, "tag": "0001_accounts_and_admin", "breakpoints": true },
+    { "idx": 2, "version": "6", "when": 1795052800000, "tag": "0002_required_and_dependencies", "breakpoints": true }
   ]
 }

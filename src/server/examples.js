@@ -63,12 +63,16 @@ const courses = [
     ['writing-plan', 'writing-review'], { 'writing-review': ['writing-plan'] }],
 ]
 
+const seeded = new WeakSet()
+
 export async function seedExamples(db) {
+  if (seeded.has(db)) return
   const author = await statement(db, 'SELECT name FROM users WHERE id = ?', AUTHOR).first()
   if (author) {
     if (author.name !== AUTHOR_NAME) {
       await statement(db, 'UPDATE users SET name = ? WHERE id = ?', AUTHOR_NAME, AUTHOR).run()
     }
+    seeded.add(db)
     return
   }
   const queries = [statement(db, 'INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)', AUTHOR, AUTHOR_NAME)]
@@ -88,4 +92,5 @@ export async function seedExamples(db) {
       id, stageId, position, JSON.stringify(requires[stageId] ?? []))))
   }
   await db.batch(queries)
+  seeded.add(db)
 }

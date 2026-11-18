@@ -7,6 +7,7 @@
     <a href="https://skill-workshop-learning.mixedbobcat1.chatgpt.site">私人试用</a>
     · <a href="#快速开始">快速开始</a>
     · <a href="#创建课程">创建课程</a>
+    · <a href="#账号与管理">账号与管理</a>
     · <a href="#mcp-接入">MCP 接入</a>
     · <a href="#参与开发">参与开发</a>
   </p>
@@ -69,6 +70,31 @@ npm run dev
 | **人数与隐私** | 统计按账号去重，参与人数包含标记学会或提交过作业的用户。提交内容与附件仅本人可见，其他用户看到聚合人数。 |
 
 </details>
+
+## 账号与管理
+
+管理员登录后，可从左侧导航进入 `/admin`，查看账号和统计、下架或恢复课程、启用或关闭登录方式。下架会隐藏课程，关卡库中单独公开的关卡仍可引用。
+
+| 登录方式 | 默认行为 |
+| --- | --- |
+| ChatGPT | Sites 托管版本默认开启，识别已有的 ChatGPT 账号。 |
+| 账号密码 | 默认开启，用户可注册并用用户名和密码登录。可从「我的账号 → 切换登录方式」进入。 |
+| OIDC | 配置身份服务后可开启。首次登录会按该服务的 Issuer 和 Subject 建立账号。 |
+
+三种登录身份各自对应一个账号。已有课程与学习记录会留在原账号，更换登录方式后可从「我的账号」切回。
+
+### 接入 OIDC
+
+1. 在身份服务中创建 Web 应用，使用 Authorization Code Flow，并支持 PKCE S256。把 `<知行谱站点地址>/api/auth/oidc/callback` 加入回调地址。默认请求 `openid profile`。
+2. 配置 [环境变量模板](./.env.example) 中的 `OIDC_ISSUER`、`OIDC_CLIENT_ID` 和 `OIDC_CLIENT_SECRET`。`OIDC_ISSUER` 应与发现文档中的 `issuer` 一致。密钥写入部署环境的 Secret，本地开发时将模板复制为 `.dev.vars`。
+3. 登入管理后台并开启 OIDC。用身份服务登录一次，确认返回站点后，在「我的账号」里可以查看自己的 OIDC Subject。
+4. 如果要**只用 OIDC**，先把身份服务中管理员的 Subject 配到 `ZXP_ADMIN_OIDC_SUB`，确认该账号能打开后台，再关闭 ChatGPT 和账号密码。也可用部署变量 `ZXP_LOGIN_METHODS=oidc` 固定登录方式。
+
+客户端认证默认用 `client_secret_basic`。提供方要求在表单里提交密钥时，将 `OIDC_CLIENT_AUTH` 设为 `client_secret_post`。支持仅使用 PKCE 的公开客户端时可设为 `none`。可选的 `OIDC_REDIRECT_URI` 用于固定登录所在的站点地址。
+
+管理员身份由部署配置指定。除了 OIDC Subject，还可配置 Sites 验证的 ChatGPT 邮箱 `ZXP_ADMIN_CHATGPT_EMAIL`，或者本地账号 ID `ZXP_ADMIN_LOCAL_USER_ID`。本地账号 ID 可在注册登录后从「我的账号」复制。
+
+Sites 的私人访问限制在应用登录页面前生效。要让其他人在进入站点时只用你的身份服务，站点入口也须允许他们访问，例如用可匿名到达的 Sites 入口，或部署在由你控制入口的环境。应用的登录开关控制进入页面后的账号方式。
 
 ## MCP 接入
 
