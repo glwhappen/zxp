@@ -243,6 +243,56 @@ test('navigation resolves profile and course-stage data together without exposin
   assert.equal((await request('/api/view?path=%2F')).headers.get('Cache-Control'), 'no-store')
 })
 
+test('course wishes support discussion, public course links and author-only resolution', async () => {
+  const author = await register('wishowner')
+  const helper = await register('wishhelper')
+  const body = { title: 'SQL 实战课程', goal: '用 SQL 分析数据', approach: '每关用一个真实数据集' }
+  await data('/api/wishes', { method: 'POST', json: body }, 401)
+  const wish = await data('/api/wishes', { method: 'POST', cookie: author, json: body }, 201)
+  const path = '/api/wishes/' + wish.id
+  assert.equal(wish.mine, true)
+  assert.equal(wish.approach, body.approach)
+  assert.equal((await data(path, {})).mine, false)
+  const view = await data('/api/view?path=' + encodeURIComponent('/wishes/' + wish.id), {})
+  assert.equal(view.view.wish.id, wish.id)
+  await data(path + '/replies', { method: 'POST', cookie: helper, json: { body: '可以练习聚合查询。' } }, 201)
+
+  const course = await data('/api/courses', {
+    method: 'POST', cookie: helper, json: { title: 'SQL 教程', visibility: 'private', stageIds: [] },
+  }, 201)
+  const link = () => data(path + '/courses', { method: 'POST', cookie: helper, json: { courseId: course.id } })
+  await data(path + '/courses', { method: 'POST', cookie: helper, json: { courseId: course.id } }, 404)
+  const visibility = async value => data('/api/courses/' + course.id, {
+    method: 'PUT', cookie: helper, json: { title: course.title, visibility: value, stageIds: [] },
+  })
+  await visibility('public')
+  await Promise.all([link(), link()])
+  assert.equal((await data(path, {})).courses.length, 1)
+  const rate = path + '/courses/' + course.id
+  await data(rate, { method: 'PUT', cookie: helper, json: { reaction: 'up' } }, 403)
+  await data(path + '/status', { method: 'PUT', cookie: helper, json: { status: 'closed' } }, 403)
+  const vote = reaction => data(rate, { method: 'PUT', cookie: author, json: { reaction } })
+  assert.equal((await vote('down')).courses[0].reaction, 'down')
+  assert.equal((await vote('none')).courses[0].reaction, null)
+  assert.equal((await vote('up')).courses[0].reaction, 'up')
+  const status = value => data(path + '/status', { method: 'PUT', cookie: author, json: { status: value } })
+  const closed = await status('closed')
+  assert.equal(closed.status, 'closed')
+  assert.equal(closed.replies.items.length, 1)
+  assert((await data('/api/wishes?status=closed', {})).items.some(item => item.id === wish.id && item.courseCount === 1))
+  assert(!(await data('/api/wishes?status=open', {})).items.some(item => item.id === wish.id))
+  await visibility('private')
+  assert.equal((await data(path, {})).courses.length, 0)
+  await data(rate, { method: 'PUT', cookie: author, json: { reaction: 'down' } }, 404)
+  assert.equal((await status('open')).status, 'open')
+
+  const token = (await data('/api/token', { method: 'POST', cookie: author })).token
+  const rpc = await data('/mcp', { method: 'POST', headers: { Authorization: 'Bearer ' + token }, json: {
+    jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'wish_get', arguments: { wishId: wish.id } },
+  } })
+  assert.equal(JSON.parse(rpc.result.content[0].text).title, body.title)
+})
+
 async function oidcFlow({ badSignature = false, badNonce = false } = {}) {
   const start = await request('/api/auth/oidc/start?return_to=%2Fadmin', { redirect: 'manual' })
   assert.equal(start.status, 303, await start.text())

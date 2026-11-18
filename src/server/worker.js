@@ -13,6 +13,7 @@ import { adminApi } from './admin.js'
 import { getLoginSettings } from './login-config.js'
 import { beginOidc, finishOidc } from './oidc.js'
 import { profileFor, readView } from './views.js'
+import { wishApi } from './wishes.js'
 
 const scriptPath = `/assets/app.${CLIENT_DIGEST}.js`
 const stylePath = `/assets/style.${CSS_DIGEST}.css`
@@ -49,6 +50,7 @@ async function api(request, env, url) {
     return json({ profile: profileFor(user, settings), view })
   }
   if (resource === 'admin') return adminApi(request, env, user, settings, url)
+  if (resource === 'wishes') return wishApi(request, db, user, url)
   if (resource === 'courses') {
     if (method === 'GET') {
       return json(id ? await courseDetail(db, user, id) : await listCourses(db, user, url.searchParams.get('scope') ?? 'public'))

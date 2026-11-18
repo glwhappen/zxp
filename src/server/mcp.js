@@ -5,6 +5,9 @@ import {
 } from './learning.js'
 import { submitAnswer, submitFile } from './submissions.js'
 import { identify } from './auth.js'
+import {
+  createWish, linkWishCourse, listWishes, rateWishCourse, replyToWish, setWishStatus, wishDetail, wishReplies,
+} from './wishes.js'
 
 const version = '2026-07-28'
 const legacy = ['2025-11-25', '2025-06-18', '2025-03-26']
@@ -76,6 +79,29 @@ tool('stage_submit_file', '上传或替换这个关卡的截图或文件。内�
     if (bytes.length > 2 * 1024 * 1024) throw new RequestError(413, 'MCP 文件上限为 2 MiB。')
     return submitFile(env, user, id(args, 'stageId'), kind, args.filename, bytes, args.courseId)
   })
+
+const wishId = { wishId: string }
+const pageNumber = { type: 'number', minimum: 1 }
+const wishCourse = { ...wishId, courseId: string }
+tool('wish_list', '按状态分页查看课程许愿。默认只查讨论中的许愿。', {
+  status: enumeration(['open', 'closed', 'all']), page: pageNumber,
+}, [], ({ DB }, user, args) => listWishes(DB, args.status, args.page), true)
+tool('wish_get', '查看许愿需求、最近回复和关联的公开课程。', wishId, ['wishId'],
+  ({ DB }, user, args) => wishDetail(DB, user, id(args, 'wishId')), true)
+tool('wish_replies', '用 before 游标读取更早的回复。', { ...wishId, before: pageNumber }, ['wishId', 'before'],
+  ({ DB }, user, args) => wishReplies(DB, id(args, 'wishId'), args.before), true)
+tool('wish_create', '发布一个课程许愿，填写想学什么和可选的学习方式。', {
+  title: string, goal: string, approach: string,
+}, ['title', 'goal'], ({ DB }, user, args) => createWish(DB, user, args))
+tool('wish_reply', '在许愿讨论中发表回复。', { ...wishId, body: string }, ['wishId', 'body'],
+  ({ DB }, user, args) => replyToWish(DB, user, id(args, 'wishId'), args))
+tool('wish_link_course', '在许愿下推荐一门公开课程。', wishCourse, ['wishId', 'courseId'],
+  ({ DB }, user, args) => linkWishCourse(DB, user, id(args, 'wishId'), args))
+tool('wish_rate_course', '仅许愿者可对关联课程点赞、点踩或撤销反馈。', {
+  ...wishCourse, reaction: enumeration(['up', 'down', 'none']),
+}, ['wishId', 'courseId', 'reaction'], ({ DB }, user, args) => rateWishCourse(DB, user, id(args, 'wishId'), id(args, 'courseId'), args))
+tool('wish_set_status', '仅许愿者可完结或重新打开自己的许愿。', { ...wishId, status: enumeration(['open', 'closed']) },
+  ['wishId', 'status'], ({ DB }, user, args) => setWishStatus(DB, user, id(args, 'wishId'), args))
 
 export async function handleMcp(request, env) {
   checkOrigin(request)

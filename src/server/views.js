@@ -1,6 +1,7 @@
 import { RequestError, fail } from './core.js'
 import { adminApi } from './admin.js'
 import { courseDetail, listCourses, listStages, stageDetail } from './learning.js'
+import { listWishes, wishDetail } from './wishes.js'
 
 export function profileFor(user, settings) {
   return { user, hosted: SITES_HOSTED, login: { methods: settings.methods, oidcLabel: settings.oidcLabel } }
@@ -17,6 +18,10 @@ export async function readView(request, env, user, settings, path) {
       return { type: 'shelf', scope, courses: user ? await listCourses(db, user, scope) : [] }
     }
     if (section === 'stages' && !id) return { type: 'library', stages: await listStages(db, user) }
+    if (section === 'wishes' && !action) {
+      return id ? { type: 'wish', wish: await wishDetail(db, user, id) }
+        : { type: 'wishes', wishes: await listWishes(db) }
+    }
     if (section === 'admin' && !id) {
       if (!user) return { type: 'sign-in', message: '登录管理员账号后进入后台。' }
       const url = new URL('/api/admin', request.url)

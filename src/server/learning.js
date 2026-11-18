@@ -26,7 +26,7 @@ const courseSelect = `
   FROM courses c JOIN users u ON u.id = c.owner_id
 `
 
-const publicCourse = "(c.visibility = 'public' AND c.moderated_at IS NULL)"
+export const publicCourse = "(c.visibility = 'public' AND c.moderated_at IS NULL)"
 
 export async function listCourses(db, user, scope = 'public') {
   const id = user?.id ?? ''

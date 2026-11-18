@@ -1,4 +1,4 @@
-const cachedTypes = new Set(['explore', 'shelf', 'library', 'course', 'stage'])
+const cachedTypes = new Set(['explore', 'shelf', 'library', 'course', 'stage', 'wishes', 'wish'])
 
 export function createViewCache(fetchView, { now = Date.now, limit = 36, freshFor = 45_000, keepFor = 300_000 } = {}) {
   const entries = new Map()

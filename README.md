@@ -7,6 +7,7 @@
     <a href="https://skill-workshop-learning.mixedbobcat1.chatgpt.site">私人试用</a>
     · <a href="#快速开始">快速开始</a>
     · <a href="#创建课程">创建课程</a>
+    · <a href="#课程许愿">课程许愿</a>
     · <a href="#账号与管理">账号与管理</a>
     · <a href="#mcp-接入">MCP 接入</a>
     · <a href="#参与开发">参与开发</a>
@@ -65,6 +66,12 @@ npm run dev
 | **人数与隐私** | 统计按账号去重，参与人数包含标记学会或提交过作业的用户。提交内容与附件仅本人可见，其他用户看到聚合人数。 |
 
 </details>
+
+## 课程许愿
+
+在「课程许愿」里写下希望开设的课程、想掌握的技能和偏好的学习方式。进入站点的人都可以浏览讨论，登录后可以发布、回复或关联公开课程。
+
+许愿者可以对每门关联课程点赞、点踩或撤销反馈，并在需求解决后标记完结。需求有变化时可以重新打开。关联课程设为私有或下架后，会从许愿详情里隐藏。
 
 ## 账号与管理
 
@@ -125,6 +132,9 @@ Sites 的私人访问限制在应用登录页面前生效。要让其他人在�
 | `stage_list`、`stage_get` | 查找可引用关卡，读取教程、统计和自己的提交 |
 | `stage_create`、`stage_update` | 创建或更新独立关卡 |
 | `stage_mark_learned`、`stage_submit_answer`、`stage_submit_file` | 切换学会状态，提交答案或附件 |
+| `wish_list`、`wish_get`、`wish_replies` | 浏览许愿、关联课程和回复 |
+| `wish_create`、`wish_reply`、`wish_link_course` | 发布许愿、回复和关联公开课程 |
+| `wish_rate_course`、`wish_set_status` | 由许愿者评价关联课程、完结或重新打开 |
 
 - 更新课程或关卡时，先读取记录，再传入完整表单。
 - 在 Markdown 教程的独立段落插入 `{{submit:answer}}`、`{{submit:screenshot}}` 或 `{{submit:file}}`，并在 `methods` 中开启对应方式。

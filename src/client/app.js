@@ -1,6 +1,7 @@
 import { icon } from './icons.js'
 import { adminPage, providerNames } from './admin.js'
 import { createViewCache } from './view-cache.js'
+import { wishBoard, wishCoursePicker, wishCourses, wishDiscussion, wishForm, wishHeading, wishPage, wishPath } from './wishes.js'
 import { hasSubmissionMarker, submissionKinds, submissionMarker } from './tutorial.js'
 import {
   button, card, categories, courseEditor, coursePage, coursePath, esc, hero, key, link, note, outline,
@@ -129,6 +130,7 @@ function showMcp() {
 }
 
 function activeNav() {
+  if (state.path.startsWith('/wishes/')) return '/wishes'
   return state.path === '/' || /^\/course\/[^/]+(?:\/stage\/[^/]+)?$/.test(state.path)
     ? '/' : state.path.startsWith('/stage/') ? '/stages'
       : state.path.startsWith('/course/') ? '/owned' : state.path
@@ -152,7 +154,7 @@ function paintShell() {
   }
   shellIdentity = identity
   const sections = [
-    ['学习', [['/', '探索课程', 'compass'], ['/learning', '我的学习', 'book']]],
+    ['学习', [['/', '探索课程', 'compass'], ['/learning', '我的学习', 'book'], ['/wishes', '课程许愿', 'spark']]],
     ['创作', [['/owned', '我的创作', 'grid'], ['/stages', '关卡库', 'layers']]],
   ]
   if (state.user?.isAdmin) sections.push(['管理', [['/admin', '管理后台', 'lock']]])
@@ -233,6 +235,14 @@ function paintView({ profile, view }, path) {
       break
     case 'shelf': courseShelf(view.courses, view.scope); break
     case 'library': stagesPage(view.stages); break
+    case 'wishes':
+      state.current = { wishes: view.wishes, listRequest: 0 }
+      main.innerHTML = wishBoard(view.wishes)
+      break
+    case 'wish':
+      state.current = { wish: view.wish, userId: state.user?.id, moreReplies: false }
+      main.innerHTML = wishPage(view.wish, state.user)
+      break
     case 'editor':
       state.editor = { course: view.course, available: view.available, ids: view.course?.stages.map(stage => stage.id) ?? [] }
       main.innerHTML = courseEditor(state.editor)
@@ -264,7 +274,7 @@ function paintView({ profile, view }, path) {
 
 function warmView(path) {
   if (navigator.connection?.saveData || !path || path === state.path || views.read(path)?.fresh) return
-  if (!/^\/(?:learning|owned|stages|stage\/[^/]+|course\/(?!new$)[^/]+(?:\/stage\/[^/]+)?)?$/.test(path)) return
+  if (!/^\/(?:learning|owned|stages|stage\/[^/]+|wishes(?:\/[^/]+)?|course\/(?!new$)[^/]+(?:\/stage\/[^/]+)?)?$/.test(path)) return
   views.load(path).catch(() => {})
 }
 
@@ -286,7 +296,8 @@ function refreshView(path, version) {
     const identityChanged = state.user?.id !== data.profile.user?.id
     if (identityChanged || data.view.type === 'error') {
       paintView(data, path)
-    } else if (['explore', 'shelf', 'library'].includes(data.view.type) && !dialog.open &&
+    } else if ((['explore', 'shelf', 'library'].includes(data.view.type)
+      || (data.view.type === 'wishes' && state.current?.wishes?.status === 'open' && state.current.wishes.page === 1)) && !dialog.open &&
       !main.contains(document.activeElement)) {
       paintView(data, path)
     } else {
@@ -371,6 +382,44 @@ function applyStage(stage, kind, context) {
   }
 }
 
+async function filterWishes(status, page) {
+  const context = state.current
+  const request = ++context.listRequest
+  const data = await api('wishes?' + new URLSearchParams({ status, page }))
+  if (context !== state.current || request !== context.listRequest) return
+  context.wishes = data
+  main.innerHTML = wishBoard(data)
+  if (page > 1) main.querySelector('.wish-board').scrollIntoView({ block: 'start' })
+}
+
+function applyWish(updated, context) {
+  if (context.userId !== state.user?.id) return false
+  const path = wishPath(updated.id)
+  const active = state.current?.wish?.id === updated.id ? state.current : null
+  const cached = views.read(path)?.data.view.wish
+  if (updated.revision < Math.max(active?.wish.revision ?? 0, cached?.revision ?? 0)) return false
+  views.invalidate((path, view) => view.type === 'wishes' || view.wish?.id === updated.id)
+  cachePage(path, { type: 'wish', wish: updated })
+  if (!active) return false
+  if (active.moreReplies) {
+    const entries = new Map([...active.wish.replies.items, ...updated.replies.items].map(reply => [reply.id, reply]))
+    updated = { ...updated, replies: {
+      items: [...entries.values()].sort((left, right) => left.id - right.id),
+      before: active.wish.replies.before,
+    } }
+  }
+  active.wish = updated
+  main.querySelector('[data-wish-heading]').innerHTML = wishHeading(updated)
+  main.querySelector('[data-wish-discussion]').innerHTML = wishDiscussion(updated)
+  main.querySelector('[data-wish-courses]').innerHTML = wishCourses(updated)
+  return true
+}
+
+async function updateWish(path, method, body, context) {
+  const updated = await api('wishes/' + key(context.wish.id) + '/' + path, { method, body })
+  return applyWish(updated, context)
+}
+
 async function handleAction(control) {
   const action = control.dataset.action
   const id = control.dataset.id
@@ -379,6 +428,53 @@ async function handleAction(control) {
     case 'register': login(action); break
     case 'account': account(); break
     case 'retry-view': await navigate(); break
+    case 'wish-new':
+      if (requireLogin()) showDialog('发布课程许愿', wishForm(), true)
+      break
+    case 'wish-filter':
+      await filterWishes(control.dataset.status, 1)
+      break
+    case 'wish-page':
+      await filterWishes(state.current.wishes.status, Number(control.dataset.page))
+      break
+    case 'wish-older': {
+      const context = state.current
+      const before = context.wish.replies.before
+      const older = await api('wishes/' + key(context.wish.id) + '/replies?before=' + before)
+      if (context !== state.current || context.wish.replies.before !== before) break
+      context.moreReplies = true
+      context.wish.replies = { items: [...older.items, ...context.wish.replies.items], before: older.before }
+      main.querySelector('[data-wish-discussion]').innerHTML = wishDiscussion(context.wish)
+      break
+    }
+    case 'wish-picker': {
+      if (!requireLogin()) break
+      const context = state.current
+      const cached = views.read('/')
+      const courses = cached?.fresh ? cached.data.view.courses : await api('courses')
+      if (context !== state.current) break
+      const linked = new Set(context.wish.courses.map(course => course.id))
+      showDialog('关联公开课程', wishCoursePicker(courses.filter(course => !linked.has(course.id))), true)
+      dialog.querySelector('input')?.focus()
+      break
+    }
+    case 'wish-attach': {
+      const context = state.current
+      const updated = await updateWish('courses', 'POST', { courseId: id }, context)
+      if (updated && dialog.contains(control)) dialog.close()
+      announce('课程已关联。')
+      break
+    }
+    case 'wish-vote':
+      await updateWish('courses/' + key(id), 'PUT', { reaction: control.dataset.reaction }, state.current)
+      announce('课程反馈已保存。')
+      break
+    case 'wish-status': {
+      const status = control.dataset.status
+      await updateWish('status', 'PUT', { status }, state.current)
+      announce(status === 'closed' ? '许愿已完结。' : '许愿已重新打开。')
+      break
+    }
     case 'logout':
       await api('auth/logout', { method: 'POST' })
       accountChanged()
@@ -511,6 +607,23 @@ async function handleForm(form) {
   const data = new FormData(form)
   const body = Object.fromEntries(data)
   switch (form.dataset.form) {
+    case 'wish-create': {
+      const author = state.user?.id
+      const wish = await api('wishes', { method: 'POST', body })
+      if (author !== state.user?.id) break
+      views.invalidate((path, view) => view.type === 'wishes')
+      const path = wishPath(wish.id)
+      cachePage(path, { type: 'wish', wish })
+      await navigate(path, true)
+      announce('许愿已发布。')
+      break
+    }
+    case 'wish-reply': {
+      const updated = await updateWish('replies', 'POST', body, state.current)
+      if (updated && form.elements.body.value === body.body) form.reset()
+      announce('回复已发布。')
+      break
+    }
     case 'search':
       state.query = body.query
       state.category = ''
@@ -657,6 +770,12 @@ document.addEventListener('submit', async event => {
 
 document.addEventListener('input', event => {
   const input = event.target
+  if (input.matches('[data-wish-course-filter]')) {
+    const query = input.value.trim().toLowerCase()
+    const choices = [...dialog.querySelectorAll('[data-action="wish-attach"]')]
+    for (const course of choices) course.hidden = !course.textContent.toLowerCase().includes(query)
+    dialog.querySelector('[data-wish-picker-empty]').hidden = choices.some(course => !course.hidden)
+  }
   if (input.matches('[data-stage-filter]')) {
     for (const option of dialog.querySelectorAll('.stage-option')) {
       option.hidden = !option.textContent.toLowerCase().includes(input.value.trim().toLowerCase())
