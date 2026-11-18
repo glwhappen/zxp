@@ -50,3 +50,11 @@ test('ask markers render in place with their options', () => {
   assert.equal(hasAskMarker(markdown, '补充一句'), true)
   assert.equal(hasAskMarker(markdown, '没写过的项'), false)
 })
+
+test('ask markers keep automatic submission placement', () => {
+  const markdown = '## 第一步\n\n先想一想。\n\n{{ask:你的方向？}}\n\n## 第二步\n\n动手做。\n\n## 第三步\n\n复盘。'
+  const { blocks, remaining } = layoutTutorial(markdown, ['answer'])
+  assert.deepEqual(remaining, [])
+  assert(blocks.some(block => block.kind === 'answer'))
+  assert(blocks.some(block => block.field?.name === '你的方向？'))
+})

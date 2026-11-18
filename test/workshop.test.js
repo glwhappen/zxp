@@ -277,6 +277,41 @@ test('required submissions gate the learned state everywhere', async () => {
   } }, 400)
 })
 
+test('stage notes can be public discussions or private notes', async () => {
+  const owner = await register('noteowner')
+  const reader = await register('notereader')
+  const base = '/api/stages/api-setup/notes'
+  const created = await data(base, { method: 'POST', cookie: owner, json: { body: '公开的疑问', visibility: 'public' } }, 201)
+  const publicNote = created.notes[0]
+  assert.equal(publicNote.visibility, 'public')
+  assert.equal(publicNote.mine, true)
+  const privateList = await data(base, { method: 'POST', cookie: owner, json: { body: '只给我自己看', visibility: 'private' } }, 201)
+  assert.equal(privateList.notes.length, 2)
+  assert.equal((await data(base, { cookie: reader })).notes.length, 1)
+  assert.equal((await data(base)).notes.length, 1)
+
+  const replied = await data(base, { method: 'POST', cookie: reader, json: { body: '我也有这个问题', parentId: publicNote.id } }, 201)
+  const withReply = replied.notes.find(note => note.id === publicNote.id)
+  assert.equal(withReply.replies.length, 1)
+  assert.equal(withReply.replies[0].body, '我也有这个问题')
+
+  const privateNote = privateList.notes.find(note => note.visibility === 'private')
+  await data(base, { method: 'POST', cookie: reader, json: { body: '回复私有', parentId: privateNote.id } }, 409)
+  await data(base + '/' + publicNote.id, { method: 'DELETE', cookie: reader }, 403)
+  await data(base, { method: 'POST', json: { body: '没有登录' } }, 401)
+  await data(base, { method: 'POST', cookie: owner, json: { body: '', visibility: 'public' } }, 400)
+
+  await data(base + '/' + publicNote.id, { method: 'PUT', cookie: owner, json: { visibility: 'private' } })
+  assert.equal((await data(base, { cookie: reader })).notes.length, 0)
+  const detail = await data('/api/stages/api-setup', { cookie: owner })
+  assert(detail.notes.some(note => note.body === '只给我自己看'))
+
+  const hidden = (await data(base, { cookie: owner })).notes
+  assert.equal(hidden.length, 2)
+  await data(base + '/' + hidden[0].id, { method: 'DELETE', cookie: owner })
+  assert.equal((await data(base, { cookie: owner })).notes.length, 1)
+})
+
 test('learners can fill small ask fields attached to tutorial steps', async () => {
   const owner = await register('askowner')
   const learner = await register('asklearner')

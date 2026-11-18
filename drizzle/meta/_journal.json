@@ -50,6 +50,13 @@
       "when": 1795063600000,
       "tag": "0006_stage_answers",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1795067200000,
+      "tag": "0007_stage_notes",
+      "breakpoints": true
     }
   ]
 }

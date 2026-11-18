@@ -187,6 +187,24 @@ code { background: #f2edf8; border-radius: 4px; padding: 1px 4px; overflow-wrap:
 .lesson-tutorial .submission { margin: 18px 0; background: #fbf8ff; border-color: #e8ddf7; }
 .lesson-tutorial [data-submission]:last-child .submission { margin-bottom: 0; }
 .remaining-heading { margin-top: 18px; font-size: 15px; }
+.lesson-finish { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.lesson-finish h2 { font-size: 16px; display: flex; align-items: center; gap: 7px; }
+.lesson-finish .submit-hint { margin-top: 4px; }
+.notes-panel { display: grid; gap: 13px; }
+.note-form { display: grid; gap: 8px; }
+.note-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.note-actions select { width: auto; max-width: 100%; }
+.note-list { list-style: none; padding: 0; display: grid; gap: 13px; }
+.note { border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 7px; }
+.note:first-child { border-top: 0; padding-top: 0; }
+.note-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.note-meta { color: var(--muted); font-size: 12px; }
+.note-tools { margin-left: auto; display: inline-flex; gap: 6px; }
+.note-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; color: #41374f; }
+.note-replies { list-style: none; padding: 2px 0 0 12px; margin: 0; border-left: 2px solid #eee7f7; display: grid; gap: 9px; }
+.note-replies .note-body { font-size: 13px; }
+.note-reply { display: flex; gap: 7px; align-items: center; }
+.note-reply input { flex: 1; min-width: 0; padding: 6px 9px; }
 .saved { background: #e9f8ee; color: #286548; border-radius: 20px; font-size: 11px; padding: 2px 7px; }
 .saved.required { background: #fff0e2; color: #95500f; }
 .submit-hint { color: #8a5a1f; font-size: 12px; margin-top: 7px; }

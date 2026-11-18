@@ -6,7 +6,7 @@ import { courseHistory, courseSharingForm, courseVersionPreview, editorChoices }
 import { wishBoard, wishCoursePicker, wishCourses, wishDiscussion, wishForm, wishHeading, wishPage, wishPath } from './wishes.js'
 import { askMarker, hasSubmissionMarker, submissionKinds, submissionMarker } from './tutorial.js'
 import {
-  button, card, categories, courseEditor, coursePage, coursePath, esc, hero, key, link, note, outline,
+  button, card, categories, courseEditor, coursePage, coursePath, esc, hero, key, link, note, notesPanel, outline,
   pickedStages, prerequisiteEditor, progress, stageEditor, stagePage, stagePath, stageStats, submission, visibility,
 } from './views.js'
 
@@ -570,6 +570,18 @@ function syncStageRules(course, stage) {
   recomputeLocks(course)
 }
 
+
+function applyNotes(result, context) {
+  if (context !== state.current) return
+  context.stage.notes = result.notes
+  context.stage.noteCanWrite = result.canWrite
+  const current = main.querySelector('[data-notes]')
+  if (!current) return
+  const holder = document.createElement('div')
+  holder.innerHTML = notesPanel(result.notes, result.canWrite)
+  current.replaceWith(holder.firstElementChild)
+}
+
 function applyStage(stage, kind, context) {
   if (context.userId !== state.user?.id) return
   const joinedCourseId = kind !== 'learned' || stage.learned ? context.course?.id : null
@@ -589,7 +601,9 @@ function applyStage(stage, kind, context) {
   const focused = slot.contains(document.activeElement)
   slot.innerHTML = submission(stage, kind)
   if (focused) slot.querySelector('button:not(:disabled)')?.focus({ preventScroll: true })
-  if (kind !== 'learned') main.querySelector('[data-submission="learned"]').innerHTML = submission(stage, 'learned')
+  if (kind !== 'learned') {
+    main.querySelectorAll('[data-submission="learned"]').forEach(slot => { slot.innerHTML = submission(stage, 'learned') })
+  }
   if (context.course) {
     const { course } = context
     syncCourseProgress(course, stage, joinedCourseId)
@@ -907,6 +921,21 @@ async function handleAction(control) {
       queueCourseDraft(form)
       break
     }
+    case 'note-delete':
+    case 'note-visibility': {
+      if (!requireLogin()) break
+      const context = state.current
+      const id = control.dataset.id
+      if (action === 'note-delete' && !confirm('删除这条笔记？')) break
+      const result = action === 'note-delete'
+        ? await api('stages/' + key(context.stage.id) + '/notes/' + key(id), { method: 'DELETE' })
+        : await api('stages/' + key(context.stage.id) + '/notes/' + key(id), {
+          method: 'PUT', body: { visibility: control.dataset.next },
+        })
+      applyNotes(result, context)
+      announce(action === 'note-delete' ? '笔记已删除。' : '可见性已更新。')
+      break
+    }
     case 'insert-ask': {
       const form = control.form
       const tutorial = form?.elements?.tutorial
@@ -1072,6 +1101,19 @@ async function handleForm(form) {
       syncCourseEditor(editor, saved)
       if (editor === state.editor) await navigate()
       announce('课程共享已更新。')
+      break
+    }
+    case 'note':
+    case 'reply': {
+      if (!requireLogin()) break
+      const context = state.current
+      const base = 'stages/' + key(context.stage.id) + '/notes'
+      const result = form.dataset.form === 'note'
+        ? await api(base, { method: 'POST', body: { body: body.body, visibility: body.visibility } })
+        : await api(base, { method: 'POST', body: { body: body.body, parentId: form.dataset.parent } })
+      applyNotes(result, context)
+      form.elements.body.value = ''
+      announce(form.dataset.form === 'note' ? '笔记已发布。' : '回复已发布。')
       break
     }
     case 'requires': {

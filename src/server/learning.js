@@ -2,6 +2,7 @@ import {
   enabledMethods, KINDS, kindLabels, METHODS, missingRequired, parseList, requiredMethods,
 } from '../shared.js'
 import { choice, fail, field, requireUser, rows, statement } from './core.js'
+import { listNotes } from './notes.js'
 import { commitCourse, editableCourse, expectEditor, expectRevision, guardCourse, publicCourse, readableCourse, sharedCourse } from './course-access.js'
 import { checkpoint } from './course-history.js'
 import {
@@ -176,8 +177,10 @@ export async function stageDetail(db, user, stageId, courseId) {
   const stage = stageData(stageResult.results[0])
   const { myLearned, ...stats } = counts.results[0]
   const missing = missingRequired(stage.required, submissions.results.map(entry => entry.kind))
+  const notes = await listNotes(db, user, stageId)
   return { ...stage, learned: Boolean(myLearned) && !missing.length, stats,
-    submissions: submissions.results, answers: answers.results, missing }
+    submissions: submissions.results, answers: answers.results, missing,
+    notes: notes.notes, noteCanWrite: notes.canWrite }
 }
 
 export async function studyStageDetail(db, user, stageId, courseId) {

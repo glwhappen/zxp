@@ -58,7 +58,8 @@ export function layoutTutorial(markdown, kinds) {
     const field = askField(token)
     return field ? { field } : null
   })
-  const explicit = markers.some(Boolean)
+  // 只有 submit 标记会关闭自动安排；{{ask:...}} 不参与提交框排布。
+  const explicit = markers.some(marker => marker?.kind)
   const ends = explicit ? [] : sectionEndIndexes(tokens)
   const scheduled = new Map()
   if (!explicit) {

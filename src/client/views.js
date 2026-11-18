@@ -210,7 +210,47 @@ function tutorialPanel(stage, signedIn) {
   return `<section class="lesson-panel lesson-tutorial"><h2>${icon('book', 20)} 教程</h2>
     ${kinds.length ? '<p class="subtle submission-intro">做到对应步骤即可提交，也可以之后回来修改。</p>' : ''}
     ${content}
-    ${remaining.length ? `<h3 class="remaining-heading">其他提交</h3>${remaining.map(kind => submissionSlot(stage, kind)).join('')}` : ''}
+    ${remaining.length ? `<h3 class="remaining-heading">交作业</h3>${remaining.map(kind => submissionSlot(stage, kind)).join('')}` : ''}
+  </section>`
+    + (kinds.length ? `<section class="lesson-panel lesson-finish">
+      <div><h2>${icon('check', 20)} 学完这一关了吗？</h2>
+        <p class="subtle">完成必填提交后，点右边的按钮记录学习进度。</p></div>
+      <div data-submission="learned">${submission(stage, 'learned')}</div>
+    </section>` : '')
+}
+
+// 关卡底部的笔记/讨论：笔记可选公开或私有，公开的其他人可以回复。
+export function notesPanel(notes = [], canWrite = false) {
+  const time = value => esc(String(value ?? '').slice(0, 16).replace('T', ' '))
+  const noteItem = note => `<li class="note" data-note="${esc(note.id)}">
+    <div class="note-head"><strong>${esc(note.author ?? '我')}</strong>
+      <span class="note-meta">${time(note.created_at)} · ${note.visibility === 'private' ? '仅自己可见' : '公开'}</span>
+      ${note.mine ? `<span class="note-tools">
+        ${button('note-visibility', note.visibility === 'private' ? '改为公开' : '改为仅自己', 'text-btn', null, `data-id="${esc(note.id)}" data-next="${note.visibility === 'private' ? 'public' : 'private'}"`)}
+        ${button('note-delete', '删除', 'text-btn', null, `data-id="${esc(note.id)}"`)}</span>` : ''}</div>
+    <p class="note-body">${esc(note.body)}</p>
+    ${note.replies?.length ? `<ul class="note-replies">${note.replies.map(reply => `<li>
+      <strong>${esc(reply.author ?? '我')}</strong>
+      <span class="note-meta">${time(reply.created_at)}</span>
+      <p class="note-body">${esc(reply.body)}</p></li>`).join('')}</ul>` : ''}
+    ${canWrite && note.visibility === 'public' ? `<form class="note-reply" data-form="reply" data-parent="${esc(note.id)}">
+      <input name="body" maxlength="2000" placeholder="回复…" aria-label="回复这条笔记" required>
+      <button class="btn">回复</button></form>` : ''}
+  </li>`
+  return `<section class="lesson-panel notes-panel" data-notes>
+    <h2>${icon('book', 20)} 笔记与讨论 <span class="subtle">${notes.length} 条</span></h2>
+    ${canWrite ? `<form class="note-form" data-form="note">
+      <textarea name="body" rows="3" maxlength="2000" placeholder="写下你的笔记，或者问一个问题…" aria-label="笔记内容" required></textarea>
+      <div class="note-actions">
+        <select name="visibility" aria-label="可见性">
+          <option value="public">公开 · 其他人可见并回复</option>
+          <option value="private">仅自己可见 · 当作私人笔记</option>
+        </select>
+        <button class="btn primary">发布</button>
+      </div>
+    </form>` : '<p class="subtle">登录后可以写笔记、参与讨论。</p>'}
+    ${notes.length ? `<ul class="note-list">${notes.map(noteItem).join('')}</ul>`
+      : canWrite ? '<p class="subtle">还没有笔记。写下你的想法，公开的笔记其他人可以回复。</p>' : ''}
   </section>`
 }
 
@@ -231,6 +271,7 @@ export function stagePage(stage, course, entry, signedIn) {
         <p>先学会${waiting.map(title => `「${esc(title)}」`).join('、')}，再回到这里继续。</p>
         ${link(coursePath(course.id), '返回课程关卡', 'btn primary', 'layers')}
       </section>
+      ${notesPanel(stage.notes ?? [], Boolean(stage.noteCanWrite))}
     </article>` : `<article class="lesson">
         <header class="lesson-header">
           <div class="lesson-kicker">${icon('layers', 17)} ${course ? `关卡 ${number} / ${course.stageCount}` : '独立关卡'}</div>
@@ -240,6 +281,7 @@ export function stagePage(stage, course, entry, signedIn) {
         </header>
         <section class="task-box"><h2>${icon('target', 20)} 学习任务</h2><p>${esc(stage.task)}</p></section>
         ${tutorialPanel(stage, signedIn)}
+        ${notesPanel(stage.notes ?? [], Boolean(stage.noteCanWrite))}
       </article>`
   return `<p class="breadcrumb">${course ? link(coursePath(course.id), esc(course.title), 'back', 'left') : link('/stages', '我的关卡', 'back', 'left')}</p>
     <div class="learning-layout ${course ? '' : 'standalone'}">

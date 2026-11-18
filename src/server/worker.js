@@ -8,6 +8,7 @@ import {
   courseDetail, courseOverview, joinCourse, listCourses, listStages, markLearned, ownedStage,
   saveCourse, saveFieldAnswer, saveStage, studyStageDetail,
 } from './learning.js'
+import { createNote, deleteNote, listNotes, updateNote } from './notes.js'
 import { downloadFile, FILE_LIMIT, submitAnswer, submitFile } from './submissions.js'
 import { handleMcp } from './mcp.js'
 import { adminApi } from './admin.js'
@@ -80,6 +81,20 @@ async function api(request, env, url) {
       const result = action === 'learned' ? await markLearned(db, user, id, data.learned, data.courseId)
         : await submitAnswer(db, user, id, data.answer, data.courseId)
       return json(result)
+    }
+    if (id && action === 'notes') {
+      if (method === 'GET') return json(await listNotes(db, user, id))
+      if (method === 'POST') {
+        requireUser(user)
+        return json(await createNote(db, user, id, await objectBody(request)), 201)
+      }
+      if ((method === 'PUT' || method === 'DELETE') && extra) {
+        requireUser(user)
+        const body = method === 'PUT' ? await objectBody(request) : {}
+        const result = method === 'PUT' ? await updateNote(db, user, id, extra, body)
+          : await deleteNote(db, user, id, extra)
+        return json(result)
+      }
     }
     if (id && action === 'field' && method === 'PUT') {
       requireUser(user)
