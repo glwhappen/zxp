@@ -1,0 +1,37 @@
+const paths = {
+  logo: '<path d="m12 2 9 5v10l-9 5-9-5V7z"/><path d="m3 7 9 5 9-5M12 12v10M7.5 4.5l9 5"/>',
+  compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
+  book: '<path d="M12 7c-2.5-2-5-2.6-9-2v13c4-.6 6.5 0 9 2 2.5-2 5-2.6 9-2V5c-4-.6-6.5 0-9 2zm0 0v13"/>',
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+  layers: '<path d="m12 3 9 5-9 5-9-5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5"/>',
+  plug: '<path d="M9 3v5m6-5v5M7 8h10v4a5 5 0 0 1-10 0zm5 9v4"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6"/><path d="m16 16 4 4"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  arrow: '<path d="M5 12h14m-6-6 6 6-6 6"/>',
+  left: '<path d="M19 12H5m6 6-6-6 6-6"/>',
+  chevron: '<path d="m9 18 6-6-6-6"/>',
+  up: '<path d="m6 15 6-6 6 6"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2"/>',
+  users: '<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2m2-15a3 3 0 0 1 0 6m1 3a4 4 0 0 1 3 4v2"/>',
+  play: '<path d="m9 5 11 7-11 7z"/>',
+  video: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3"/>',
+  image: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="1.5"/><path d="m4 17 5-4 4 3 4-5 4 4"/>',
+  code: '<path d="m8 6-6 6 6 6m8-12 6 6-6 6M14 5l-4 14"/>',
+  pen: '<path d="m14 6 4 4M4 20l4-.8L20 7l-4-4L4 15z"/>',
+  check: '<path d="m5 12 4 4L19 6"/>',
+  close: '<path d="m6 6 12 12M18 6 6 18"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+  text: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+  file: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zm0 0v6h6"/>',
+  upload: '<path d="M12 16V4m-4 4 4-4 4 4M4 16v4h16v-4"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/>',
+  lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  spark: '<path d="M12 2c0 7 3 10 10 10-7 0-10 3-10 10 0-7-3-10-10-10 7 0 10-3 10-10Z"/>',
+  link: '<path d="M10 13a4 4 0 0 0 6 0l4-4a4 4 0 0 0-6-6l-2 2m2 6a4 4 0 0 0-6 0l-4 4a4 4 0 0 0 6 6l2-2"/>',
+}
+
+export function icon(name, size = 20) {
+  return `<svg aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">${paths[name] ?? paths.layers}</svg>`
+}

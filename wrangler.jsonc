@@ -1,0 +1,13 @@
+{
+  "name": "skill-workshop",
+  "main": ".wrangler/dev/worker.js",
+  "compatibility_date": "2026-11-18",
+  "dev": { "ip": "127.0.0.1", "port": 8787, "enable_containers": false },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "skill-workshop",
+    "database_id": "00000000-0000-4000-8000-000000000001",
+    "migrations_dir": "drizzle"
+  }],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "skill-workshop-files" }]
+}
