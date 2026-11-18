@@ -11,6 +11,7 @@ import { promisify } from 'node:util'
 import { buildSite } from '../scripts/build.mjs'
 
 const wrangler = resolve('node_modules/wrangler/bin/wrangler.js')
+const config = resolve('wrangler.jsonc')
 const env = { ...process.env, WRANGLER_SEND_METRICS: 'false' }
 let server
 let temp
@@ -34,8 +35,8 @@ before(async () => {
   await mkdir(persist)
   await buildSite({ outfile })
   await promisify(execFile)(process.execPath,
-    [wrangler, 'd1', 'migrations', 'apply', 'DB', '--local', '--persist-to', persist], { env, timeout: 35_000 })
-  server = spawn(process.execPath, [wrangler, 'dev', outfile, '--ip', '127.0.0.1', '--port', String(port),
+    [wrangler, 'd1', 'migrations', 'apply', 'DB', '--config', config, '--local', '--persist-to', persist], { env, timeout: 35_000 })
+  server = spawn(process.execPath, [wrangler, 'dev', outfile, '--config', config, '--ip', '127.0.0.1', '--port', String(port),
     '--inspector-port', '0', '--persist-to', persist], { env, stdio: ['ignore', 'pipe', 'pipe'] })
   for (const stream of [server.stdout, server.stderr]) stream.on('data', chunk => {
     workerLog = (workerLog + chunk).slice(-8000)

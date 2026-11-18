@@ -251,6 +251,11 @@ legend { font-size: 13px; font-weight: 670; color: #473a58; }
 @media (max-width: 370px) {
   .catalog-grid { grid-template-columns: 1fr; }
 }
+@media (max-width: 460px) {
+  .card-footer { flex-wrap: wrap; gap: 4px 8px; align-content: center; padding-block: 7px; }
+  .card-footer span { white-space: nowrap; }
+  .card-footer > svg { display: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; }
 }
