@@ -1,6 +1,6 @@
 import DOMPurify from 'dompurify'
-import { marked } from 'marked'
 import { icon } from './icons.js'
+import { layoutTutorial, submissionKinds } from './tutorial.js'
 
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, char =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
@@ -108,16 +108,15 @@ export function stageStats(stage) {
 }
 
 export function submission(stage, kind) {
+  if (kind === 'learned') {
+    return button('learned', stage.learned ? '已学会 · 撤销' : '标记学会了', stage.learned ? 'btn done' : 'btn', 'check')
+  }
   const current = stage.submissions.find(entry => entry.kind === kind)
   const allowed = stage.methods.includes(kind)
   if (!current && !allowed) return ''
   const [label, symbol] = methods[kind]
   const uploaded = `/api/stages/${key(stage.id)}/upload/${kind}`
   const title = `<div class="submit-title">${icon(symbol, 19)}<h3>${label}</h3>${current ? '<span class="saved">已提交</span>' : ''}</div>`
-  if (kind === 'learned') {
-    return `<div class="submission learned-block">${title}
-      ${button('learned', stage.learned ? '已学会 · 撤销' : '标记学会了', stage.learned ? 'btn done' : 'btn primary', 'check')}</div>`
-  }
   if (kind === 'answer') {
     return `<form class="submission" data-form="answer">${title}
       <textarea name="answer" aria-label="文本答案" maxlength="20000" rows="4" placeholder="写下你的练习答案或学习记录…" required ${allowed ? '' : 'readonly'}>${esc(current?.answer)}</textarea>
@@ -133,29 +132,42 @@ export function submission(stage, kind) {
   </form>`
 }
 
-export function stagePage(stage, course) {
-  const content = DOMPurify.sanitize(marked.parse(stage.tutorial, { gfm: true }), {
+function submissionSlot(stage, kind) {
+  return `<div data-submission="${kind}">${submission(stage, kind)}</div>`
+}
+
+function tutorialPanel(stage) {
+  const kinds = submissionKinds.filter(kind => stage.methods.includes(kind) || stage.submissions.some(entry => entry.kind === kind))
+  if (!stage.tutorial) {
+    return kinds.length ? `<section class="lesson-panel"><h2>${icon('upload', 20)} 练习提交</h2>
+      ${kinds.map(kind => submissionSlot(stage, kind)).join('')}</section>` : ''
+  }
+
+  const { blocks, remaining } = layoutTutorial(stage.tutorial, kinds)
+  const content = blocks.map(block => block.kind ? submissionSlot(stage, block.kind) : `<div class="markdown">${DOMPurify.sanitize(block.html, {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea', 'style', 'iframe'],
     FORBID_ATTR: ['style', 'id', 'class'],
     ALLOW_DATA_ATTR: false,
-  })
-  const stageMethods = Object.keys(methods).filter(kind => stage.methods.includes(kind)
-    || (kind === 'learned' ? stage.learned : stage.submissions.some(entry => entry.kind === kind)))
+  })}</div>`).join('')
+  return `<section class="lesson-panel lesson-tutorial"><h2>${icon('book', 20)} 教程</h2>
+    ${kinds.length ? '<p class="subtle submission-intro">做到对应步骤即可提交，也可以之后回来修改。</p>' : ''}
+    ${content}
+    ${remaining.length ? `<h3 class="remaining-heading">其他提交</h3>${remaining.map(kind => submissionSlot(stage, kind)).join('')}` : ''}
+  </section>`
+}
+
+export function stagePage(stage, course) {
   return `<p class="breadcrumb">${course ? link(coursePath(course.id), esc(course.title), 'back', 'left') : link('/stages', '关卡库', 'back', 'left')}</p>
     <div class="learning-layout ${course ? '' : 'standalone'}">
       <article class="lesson">
         <header class="lesson-header">
           <div class="lesson-kicker">${icon('layers', 17)} ${course ? `关卡 ${course.stages.findIndex(item => item.id === stage.id) + 1} / ${course.stageCount}` : '独立关卡'}</div>
           <div class="section-head"><h1>${esc(stage.title)}</h1>${stage.owned ? button('edit-stage', '编辑', 'btn', 'pen') : ''}</div>
-          <div class="stats" data-stage-stats>${stageStats(stage)}</div>
+          <div class="lesson-status"><div class="stats" data-stage-stats>${stageStats(stage)}</div>${submissionSlot(stage, 'learned')}</div>
         </header>
         <section class="task-box"><h2>${icon('target', 20)} 学习任务</h2><p>${esc(stage.task)}</p></section>
-        ${stage.tutorial ? `<section class="lesson-panel"><h2>${icon('book', 20)} 教程</h2><div class="markdown">${content}</div></section>` : ''}
-        <section class="lesson-panel"><h2>${icon('upload', 20)} 提交记录</h2>
-          <p class="subtle submission-intro">想好就提交。你可以随时回来修改或更新提交。</p>
-          ${stageMethods.map(kind => `<div data-submission="${kind}">${submission(stage, kind)}</div>`).join('')}
-        </section>
+        ${tutorialPanel(stage)}
       </article>
       ${course ? `<aside class="lesson-outline"><h2>本课关卡</h2><div data-outline>${progress(course)}${outline(course, stage.id)}</div></aside>` : ''}
     </div>`
@@ -206,6 +218,10 @@ export function stageEditor(stage) {
     <label>关卡名称<input name="title" required maxlength="100" value="${esc(stage?.title)}"></label>
     <label>学习任务<textarea name="task" required maxlength="5000" rows="2" placeholder="描述一个可以完成的任务">${esc(stage?.task)}</textarea></label>
     <label>教程 <span class="subtle">支持 Markdown</span><textarea name="tutorial" rows="6" maxlength="35000" placeholder="练习步骤、示例和参考链接">${esc(stage?.tutorial)}</textarea></label>
+    <div class="placement-tools">
+      <p class="subtle" data-placement-status role="status">将光标放在练习题后，插入对应的提交框。</p>
+      <div class="inline-actions">${submissionKinds.map(kind => button('insert-submission', '插入' + methods[kind][0], 'btn', methods[kind][1], `data-kind="${kind}"`)).join('')}</div>
+    </div>
     <fieldset><legend>提交方式</legend><div class="checks">${Object.entries(methods).map(([value, [label]]) =>
       `<label><input type="checkbox" name="methods" value="${value}" ${(stage?.methods ?? ['learned']).includes(value) ? 'checked' : ''} ${value === 'learned' ? 'disabled' : ''}> ${label}</label>`).join('')}</div></fieldset>
     <label>可见性<select name="visibility">${visOptions(stage?.visibility)}</select></label>

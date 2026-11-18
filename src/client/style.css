@@ -145,7 +145,8 @@ progress::-webkit-progress-value { background: var(--accent); }
 .lesson-panel h2, .task-box h2 { display: flex; align-items: center; gap: 8px; }
 .task-box { background: #f1eaff; border: 1px solid #e9dcfc; border-radius: var(--radius); padding: 19px 21px; }
 .task-box p { margin-top: 7px; white-space: pre-wrap; overflow-wrap: anywhere; color: #4e4162; font-size: 14px; }
-.stats { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 12px; margin-top: 13px; color: #6d627a; font-size: 12px; }
+.lesson-status { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 14px; margin-top: 13px; }
+.stats { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 12px; color: #6d627a; font-size: 12px; }
 .stat-main { display: inline-flex; gap: 5px; align-items: center; color: var(--accent-dark); }
 .lesson-outline { position: sticky; top: 16px; padding: 17px; }
 .lesson-outline h2 { font-size: 16px; }
@@ -164,8 +165,9 @@ code { background: #f2edf8; border-radius: 4px; padding: 1px 4px; overflow-wrap:
 .submit-title, .upload-row, .existing-file { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .submit-title { color: #53416d; margin-bottom: 10px; }
 .submit-title h3 { font-size: 14px; }
-.learned-block { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.learned-block .submit-title { margin-bottom: 0; }
+.lesson-tutorial .submission { margin: 18px 0; background: #fbf8ff; border-color: #e8ddf7; }
+.lesson-tutorial [data-submission]:last-child .submission { margin-bottom: 0; }
+.remaining-heading { margin-top: 18px; font-size: 15px; }
 .saved { background: #e9f8ee; color: #286548; border-radius: 20px; font-size: 11px; padding: 2px 7px; }
 .existing-file { margin-bottom: 12px; overflow-wrap: anywhere; font-size: 13px; }
 .existing-file img { width: 62px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
@@ -205,6 +207,8 @@ fieldset { margin: 0; padding: 9px; border: 1px solid var(--line); border-radius
 legend { font-size: 13px; font-weight: 670; color: #473a58; }
 .checks { display: flex; gap: 7px 13px; flex-wrap: wrap; }
 .checks label { display: flex !important; align-items: center; }
+.placement-tools { display: grid; gap: 6px; }
+.placement-tools .btn { min-height: 34px; font-size: 12px; padding-inline: 10px; }
 .stage-options { display: grid; gap: 7px; max-height: 45vh; overflow: auto; padding: 2px; }
 .stage-option { border: 1px solid var(--line); padding: 9px; border-radius: 8px; display: flex; gap: 8px; align-items: center; text-align: left; background: white; color: #30253e; }
 .stage-option:hover { border-color: #d6c3f7; background: #f8f3ff; }

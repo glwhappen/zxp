@@ -1,4 +1,5 @@
 import { icon } from './icons.js'
+import { hasSubmissionMarker, submissionKinds, submissionMarker } from './tutorial.js'
 import {
   button, card, categories, courseEditor, coursePage, coursePath, esc, hero, key, link, note, outline,
   pickedStages, progress, stageEditor, stagePage, stagePath, stageStats, submission, visibility,
@@ -241,7 +242,10 @@ function applyStage(stage, kind, context) {
   if (context !== state.current) return
   context.stage = stage
   main.querySelector('[data-stage-stats]').innerHTML = stageStats(stage)
-  main.querySelector(`[data-submission="${kind}"]`).innerHTML = submission(stage, kind)
+  const slot = main.querySelector(`[data-submission="${kind}"]`)
+  const focused = slot.contains(document.activeElement)
+  slot.innerHTML = submission(stage, kind)
+  if (focused) slot.querySelector('button:not(:disabled)')?.focus({ preventScroll: true })
   if (context.course) {
     const { course } = context
     course.stages.find(item => item.id === stage.id).learned = stage.learned
@@ -317,6 +321,30 @@ async function handleAction(control) {
         showDialog('编辑关卡', stageEditor(stage), true)
       }
       break
+    case 'insert-submission': {
+      const kind = control.dataset.kind
+      if (!submissionKinds.includes(kind)) break
+      const form = control.form
+      const tutorial = form.elements.tutorial
+      const status = form.querySelector('[data-placement-status]')
+      const checkbox = form.querySelector(`input[name="methods"][value="${kind}"]`)
+      const marker = `\n\n${submissionMarker(kind)}\n\n`
+      if (hasSubmissionMarker(tutorial.value, kind)) {
+        checkbox.checked = true
+        status.textContent = '教程中已有这类提交框，可移动原标记调整位置。'
+        break
+      }
+      if (tutorial.value.length + marker.length > tutorial.maxLength) {
+        status.textContent = '教程已接近长度上限，请缩短内容后再插入。'
+        break
+      }
+      const position = tutorial.selectionEnd
+      tutorial.setRangeText(marker, position, position, 'end')
+      checkbox.checked = true
+      status.textContent = '已插入提交框。你可以移动教程中的标记调整位置。'
+      tutorial.focus()
+      break
+    }
     case 'pick-stage': chooseStageDialog(); break
     case 'attach-stage':
       state.editor.ids.push(id)

@@ -20,7 +20,13 @@ const course = {
   title: string, description: string, category: enumeration(CATEGORIES), theme: enumeration(THEMES),
   visibility, stageIds: array(string),
 }
-const stage = { title: string, task: string, tutorial: string, methods: array(enumeration(METHODS)), visibility }
+const stage = {
+  title: string,
+  task: string,
+  tutorial: { ...string, description: 'Markdown 教程。将 {{submit:answer}}、{{submit:screenshot}} 或 {{submit:file}} 放在独立段落中，安排已开启的提交框。' },
+  methods: array(enumeration(METHODS)),
+  visibility,
+}
 const id = (args, key) => field(args[key], key, 100)
 const tools = new Map()
 
