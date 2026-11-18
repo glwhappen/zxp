@@ -216,7 +216,8 @@ function tutorialPanel(stage, signedIn) {
     ALLOW_DATA_ATTR: false,
   })}</div>`).join('')
   return `<section class="lesson-panel lesson-tutorial"><h2>${icon('book', 20)} 教程</h2>
-    ${kinds.length ? '<p class="subtle submission-intro">做到对应步骤即可提交，也可以之后回来修改。</p>' : ''}
+    ${kinds.length ? `<p class="subtle submission-intro">${blocks.some(block => block.kind)
+      ? '做到对应步骤即可提交，也可以之后回来修改。' : '看完教程后在下面提交作业，也可以之后回来修改。'}</p>` : ''}
     ${content}
     ${remaining.length ? `<h3 class="remaining-heading">交作业</h3>${remaining.map(kind => submissionSlot(stage, kind)).join('')}` : ''}
   </section>`

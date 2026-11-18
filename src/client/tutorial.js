@@ -31,25 +31,6 @@ export function hasAskMarker(markdown, name) {
   return marked.lexer(markdown).some(token => askField(token)?.name === name)
 }
 
-function sectionEndIndexes(tokens) {
-  const ends = []
-  let hasContent = false
-  tokens.forEach((token, index) => {
-    if (token.type === 'heading') {
-      if (hasContent) ends.push(index)
-      hasContent = false
-    } else if (token.type !== 'space') {
-      hasContent = true
-    }
-  })
-  if (!ends.length) {
-    tokens.forEach((token, index) => {
-      if (token.type === 'paragraph' && index + 1 < tokens.length) ends.push(index + 1)
-    })
-  }
-  return [...ends, tokens.length]
-}
-
 export function layoutTutorial(markdown, kinds) {
   const tokens = marked.lexer(markdown)
   const markers = tokens.map(token => {
@@ -58,18 +39,6 @@ export function layoutTutorial(markdown, kinds) {
     const field = askField(token)
     return field ? { field } : null
   })
-  // 只有 submit 标记会关闭自动安排；{{ask:...}} 不参与提交框排布。
-  const explicit = markers.some(marker => marker?.kind)
-  const ends = explicit ? [] : sectionEndIndexes(tokens)
-  const scheduled = new Map()
-  if (!explicit) {
-    kinds.forEach((kind, index) => {
-      const boundary = kinds.length === 1 ? Math.floor((ends.length - 1) / 2)
-        : Math.floor((index + 1) * ends.length / (kinds.length + 1))
-      const end = ends[boundary]
-      scheduled.set(end, [...(scheduled.get(end) ?? []), kind])
-    })
-  }
 
   const blocks = []
   const remaining = new Set(kinds)
@@ -87,15 +56,12 @@ export function layoutTutorial(markdown, kinds) {
     }
   }
 
+  // 只有作者手动插入的 {{submit:...}} 才会出现在教程中间；其余提交框一律放到末尾的「交作业」。
   for (let index = 0; index < tokens.length; index++) {
-    if (markers[index]) {
-      addSlots(index, [markers[index]])
-      start = index + 1
-    } else if (scheduled.has(index)) {
-      addSlots(index, scheduled.get(index))
-      start = index
-    }
+    if (!markers[index]) continue
+    addSlots(index, [markers[index]])
+    start = index + 1
   }
-  addSlots(tokens.length, scheduled.get(tokens.length) ?? [])
+  addSlots(tokens.length, [])
   return { blocks, remaining: [...remaining] }
 }
