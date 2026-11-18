@@ -1,6 +1,7 @@
 import { statement } from './core.js'
 
 const AUTHOR = 'workshop-examples'
+const AUTHOR_NAME = '知行谱'
 const stages = [
   ['api-setup', '配置大模型 API', '配置一个大模型 API，并成功发出一次测试请求。', `## 1. 获取 API 密钥
 
@@ -55,8 +56,14 @@ const courses = [
 ]
 
 export async function seedExamples(db) {
-  if (await statement(db, 'SELECT 1 FROM users WHERE id = ?', AUTHOR).first()) return
-  const queries = [statement(db, 'INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)', AUTHOR, '技能工坊')]
+  const author = await statement(db, 'SELECT name FROM users WHERE id = ?', AUTHOR).first()
+  if (author) {
+    if (author.name !== AUTHOR_NAME) {
+      await statement(db, 'UPDATE users SET name = ? WHERE id = ?', AUTHOR_NAME, AUTHOR).run()
+    }
+    return
+  }
+  const queries = [statement(db, 'INSERT OR IGNORE INTO users (id, name) VALUES (?, ?)', AUTHOR, AUTHOR_NAME)]
   for (const [id, title, task, tutorial, methods] of stages) {
     queries.push(statement(db, `
       INSERT OR IGNORE INTO stages (id, owner_id, title, task, tutorial, methods, visibility)

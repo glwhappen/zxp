@@ -10,6 +10,7 @@ const sidebar = document.querySelector('#sidebar')
 const topbar = document.querySelector('#topbar')
 const dialog = document.querySelector('#dialog')
 const toast = document.querySelector('#toast')
+const productName = '知行谱'
 const state = { user: null, hosted: false, path: '', category: '', query: '', current: null, editor: null }
 let navigation = 0
 let toastTimeout
@@ -49,12 +50,12 @@ function showDialog(title, body, wide = false) {
 function login(mode = 'login') {
   if (state.hosted) {
     const returnTo = /^\/(?!\/)/.test(location.pathname) ? location.pathname : '/'
-    showDialog('登录技能工坊', `<p>使用 ChatGPT 账号保存你的学习进度、提交作业和创建课程。</p>
+    showDialog(`登录${productName}`, `<p>使用 ChatGPT 账号保存你的学习进度、提交作业和创建课程。</p>
       <a class="btn primary" href="/signin-with-chatgpt?return_to=${key(returnTo)}" target="_top">使用 ChatGPT 登录</a>`)
     return
   }
   const register = mode === 'register'
-  showDialog(register ? '创建账号' : '登录技能工坊', `<form data-form="auth" data-mode="${mode}">
+  showDialog(register ? '创建账号' : `登录${productName}`, `<form data-form="auth" data-mode="${mode}">
     ${register ? '<label>昵称<input name="name" maxlength="40" autocomplete="nickname" required></label>' : ''}
     <label>用户名<input name="username" autocomplete="username" minlength="3" maxlength="32" required></label>
     <label>密码<input name="password" type="password" minlength="8" maxlength="128" autocomplete="${register ? 'new-password' : 'current-password'}" required></label>
@@ -79,7 +80,7 @@ function account() {
 
 function showMcp() {
   if (state.hosted) {
-    showDialog('MCP 连接', `<p>在 ChatGPT 或 Codex 的「插件 → 个人 → 由你创建」中连接技能工坊。</p>
+    showDialog('MCP 连接', `<p>在 ChatGPT 或 Codex 的「插件 → 个人 → 由你创建」中连接${productName}。</p>
       <p>让助手先列出关卡，再为你创建课程。例如：</p>
       <blockquote>列出关卡库中可引用的关卡，把「配置大模型 API」加入一门叫「AI 视频练习」的私有课程。</blockquote>`)
     return
@@ -99,7 +100,7 @@ function paintShell() {
     ? '/' : state.path.startsWith('/stage/') ? '/stages'
       : state.path.startsWith('/course/') ? '/owned' : state.path
   sidebar.innerHTML = `<a class="brand" href="/" data-link><span class="brand-icon">${icon('logo', 23)}</span>
-    <span><strong>技能工坊</strong><small>SKILL WORKSHOP</small></span></a>
+    <span><strong>${productName}</strong><small>ZXP</small></span></a>
     <nav aria-label="主要导航">${sections.map(([heading, links]) => `<div class="nav-group"><div class="nav-title">${heading}</div>
       ${links.map(([url, label, symbol]) => `<a class="nav-link ${active === url ? 'active' : ''}" href="${url}" data-link
         ${active === url ? 'aria-current="page"' : ''}>${icon(symbol, 19)}${label}</a>`).join('')}</div>`).join('')}</nav>
@@ -218,7 +219,7 @@ async function navigate(path = location.pathname, push = false) {
     } else {
       throw new Error('页面不存在。')
     }
-    document.title = `${main.querySelector('h1')?.textContent ?? '学习'} · 技能工坊`
+    document.title = `${main.querySelector('h1')?.textContent ?? '学习'} · ${productName}`
   } catch (error) {
     if (version !== navigation) return
     main.innerHTML = `<div class="sign-in-panel">${note(error.message, 'close')}${link('/', '返回课程首页')}</div>`

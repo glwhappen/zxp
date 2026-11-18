@@ -8,7 +8,7 @@ import { identify } from './auth.js'
 
 const version = '2026-07-28'
 const legacy = ['2025-11-25', '2025-06-18', '2025-03-26']
-const info = { name: 'skill-workshop', version: '0.1.0' }
+const info = { name: 'zxp', version: '0.1.0' }
 const capabilities = { tools: {} }
 const cacheHints = { ttlMs: 0, cacheScope: 'public' }
 const string = { type: 'string' }
