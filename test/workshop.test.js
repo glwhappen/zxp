@@ -157,11 +157,77 @@ test('MCP creates courses with a revocable user token', async () => {
   assert.equal(discovery.result.supportedVersions[0], '2026-07-28')
   const listing = await rpc('tools/list')
   assert(listing.result.tools.some(tool => tool.name === 'course_create'))
-  const created = await rpc('tools/call', { name: 'course_create', arguments: { title: 'MCP 课程', stageIds: ['api-setup'] } })
+  const created = await rpc('tools/call', { name: 'course_create', arguments: {
+    title: 'MCP 课程', stageIds: ['api-setup', 'video-shots'], requires: { 'video-shots': ['api-setup'] },
+  } })
   const course = JSON.parse(created.result.content[0].text)
   assert.equal(course.stages[0].id, 'api-setup')
+  assert.deepEqual(course.stages[1].requires, ['api-setup'])
+  assert.deepEqual(course.stages[0].required, ['answer'])
   assert.equal(course.visibility, 'private')
   assert.equal((await data('/api/courses?scope=owned', { cookie }))[0].id, course.id)
   await data('/api/token', { method: 'DELETE', cookie })
   await rpc('tools/call', { name: 'course_list' }, token, 401)
+})
+
+test('required submissions gate the learned state everywhere', async () => {
+  const owner = await register('requireowner')
+  const learner = await register('requirelearner')
+  const form = {
+    title: '必填关卡', task: '提交答案才能学会', tutorial: '## 练习',
+    methods: ['learned', 'answer', 'file'], required: ['answer'], visibility: 'public',
+  }
+  const stage = await data('/api/stages', { method: 'POST', cookie: owner, json: form }, 201)
+  assert.deepEqual(stage.required, ['answer'])
+  assert.deepEqual(stage.missing, ['answer'])
+  const course = await data('/api/courses', { method: 'POST', cookie: owner, json: {
+    title: '必填课程', visibility: 'public', stageIds: [stage.id],
+  } }, 201)
+  const path = '/api/stages/' + stage.id
+  await data(path + '/learned', { method: 'PUT', cookie: learner, json: { learned: true, courseId: course.id } }, 409)
+  const answered = await data(path + '/answer', { method: 'PUT', cookie: learner, json: { answer: '我的答案', courseId: course.id } })
+  assert.deepEqual(answered.missing, [])
+  assert.equal(answered.learned, false)
+  const learned = await data(path + '/learned', { method: 'PUT', cookie: learner, json: { learned: true, courseId: course.id } })
+  assert.equal(learned.learned, true)
+  assert.equal((await data('/api/courses/' + course.id, { cookie: learner })).completedCount, 1)
+  assert.equal((await data('/api/courses?scope=joined', { cookie: learner }))[0].completedCount, 1)
+
+  await data(path, { method: 'PUT', cookie: owner, json: { ...form, required: ['answer', 'file'] } })
+  const stale = await data('/api/courses/' + course.id, { cookie: learner })
+  assert.equal(stale.completedCount, 0)
+  assert.equal(stale.stages[0].learned, false)
+  assert.deepEqual(stale.stages[0].missing, ['file'])
+  await data(path, { method: 'PUT', cookie: owner, json: { ...form, methods: ['learned', 'answer'], required: ['screenshot'] } }, 400)
+})
+
+test('course stage dependencies lock later stages until prerequisites are learned', async () => {
+  const owner = await register('depowner')
+  const learner = await register('deplearner')
+  const make = title => data('/api/stages', { method: 'POST', cookie: owner, json: {
+    title, task: title + '的任务', methods: ['learned'], visibility: 'public',
+  } }, 201)
+  const [first, second, third] = [await make('步骤一'), await make('步骤二'), await make('步骤三')]
+  const form = {
+    title: '依赖课程', visibility: 'public', stageIds: [first.id, second.id, third.id],
+    requires: { [second.id]: [first.id], [third.id]: [first.id, second.id] },
+  }
+  const course = await data('/api/courses', { method: 'POST', cookie: owner, json: form }, 201)
+  assert.deepEqual(course.stages[1].requires, [first.id])
+  assert.deepEqual(course.stages.map(stage => stage.locked), [false, false, false])
+
+  const locked = await data('/api/courses/' + course.id, { cookie: learner })
+  assert.deepEqual(locked.stages.map(stage => stage.locked), [false, true, true])
+
+  await data('/api/stages/' + first.id + '/learned', { method: 'PUT', cookie: learner, json: { learned: true, courseId: course.id } })
+  const unlocked = await data('/api/courses/' + course.id, { cookie: learner })
+  assert.deepEqual(unlocked.stages.map(stage => stage.locked), [false, false, true])
+  assert.equal(unlocked.completedCount, 1)
+
+  await data('/api/courses/' + course.id, { method: 'PUT', cookie: owner, json: {
+    ...form, requires: { [first.id]: [second.id] },
+  } }, 400)
+  await data('/api/courses/' + course.id, { method: 'PUT', cookie: owner, json: {
+    ...form, requires: { [second.id]: [second.id] },
+  } }, 400)
 })

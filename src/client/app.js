@@ -199,7 +199,11 @@ async function navigate(path = location.pathname, push = false) {
       ])
       if (version !== navigation) return
       if (course && !course.owned) throw new Error('只有课程作者可以编辑课程。')
-      state.editor = { course, available, ids: course?.stages.map(stage => stage.id) ?? [] }
+      state.editor = {
+        course, available,
+        ids: course?.stages.map(stage => stage.id) ?? [],
+        requires: Object.fromEntries((course?.stages ?? []).map(stage => [stage.id, stage.requires ?? []])),
+      }
       main.innerHTML = courseEditor(state.editor)
     } else if (parts[0] === 'course' && parts.length === 2) {
       const course = await api('courses/' + key(parts[1]))
@@ -215,7 +219,7 @@ async function navigate(path = location.pathname, push = false) {
       if (version !== navigation) return
       if (course && !course.stages.some(item => item.id === stage.id)) throw new Error('这门课程未引用该关卡。')
       state.current = { course, stage }
-      main.innerHTML = stagePage(stage, course)
+      main.innerHTML = stagePage(stage, course, course?.stages.find(item => item.id === stage.id))
     } else {
       throw new Error('页面不存在。')
     }
@@ -228,6 +232,40 @@ async function navigate(path = location.pathname, push = false) {
 
 function paintPicked() {
   main.querySelector('[data-picked-stages]').innerHTML = pickedStages(state.editor)
+}
+
+// 关卡顺序变化后，丢掉不再排在前面或已被移除的依赖，避免保存时被服务端拒绝。
+function pruneRequires() {
+  const { ids, requires } = state.editor
+  const position = new Map(ids.map((id, index) => [id, index]))
+  for (const [stageId, deps] of Object.entries(requires)) {
+    if (!position.has(stageId)) {
+      delete requires[stageId]
+      continue
+    }
+    requires[stageId] = deps.filter(dep => position.has(dep) && position.get(dep) < position.get(stageId))
+  }
+}
+
+function recomputeLocks(course) {
+  const byId = new Map(course.stages.map(stage => [stage.id, stage]))
+  course.stages.forEach(stage => {
+    stage.locked = !course.owned && !stage.learned
+      && (stage.requires ?? []).some(id => !byId.get(id)?.learned)
+  })
+}
+
+function requiresDialog(stageId) {
+  const { ids, requires } = state.editor
+  const titles = new Map(state.editor.available.map(stage => [stage.id, stage.title]))
+  const chosen = new Set(requires[stageId] ?? [])
+  const candidates = ids.slice(0, ids.indexOf(stageId))
+  showDialog('设置前置关卡', candidates.length ? `<form data-form="requires" data-stage="${esc(stageId)}">
+    <p class="subtle">勾选的关卡全部学会后，学习者才能打开当前关卡。</p>
+    <div class="stage-options">${candidates.map(id => `<label class="stage-option"><input type="checkbox" name="deps" value="${esc(id)}" ${chosen.has(id) ? 'checked' : ''}>
+      <span class="step-text"><strong>${esc(titles.get(id) ?? id)}</strong></span></label>`).join('')}</div>
+    <div class="form-error" role="alert" hidden></div><div class="submit-row"><button class="btn primary">保存依赖</button></div>
+  </form>` : '<p class="subtle">当前关卡排在第一位，没有可以作为前置的关卡。</p>')
 }
 
 function chooseStageDialog() {
@@ -247,10 +285,13 @@ function applyStage(stage, kind, context) {
   const focused = slot.contains(document.activeElement)
   slot.innerHTML = submission(stage, kind)
   if (focused) slot.querySelector('button:not(:disabled)')?.focus({ preventScroll: true })
+  if (kind !== 'learned') main.querySelector('[data-submission="learned"]').innerHTML = submission(stage, 'learned')
   if (context.course) {
     const { course } = context
-    course.stages.find(item => item.id === stage.id).learned = stage.learned
+    const entry = course.stages.find(item => item.id === stage.id)
+    Object.assign(entry, { learned: stage.learned, required: stage.required, missing: stage.missing })
     course.completedCount = course.stages.filter(item => item.learned).length
+    recomputeLocks(course)
     main.querySelector('[data-outline]').innerHTML = progress(course) + outline(course, stage.id)
   }
 }
@@ -347,6 +388,7 @@ async function handleAction(control) {
       break
     }
     case 'pick-stage': chooseStageDialog(); break
+    case 'pick-deps': requiresDialog(id); break
     case 'attach-stage':
       state.editor.ids.push(id)
       dialog.close()
@@ -354,6 +396,7 @@ async function handleAction(control) {
       break
     case 'remove-stage':
       state.editor.ids = state.editor.ids.filter(stageId => stageId !== id)
+      pruneRequires()
       paintPicked()
       break
     case 'move-up':
@@ -362,6 +405,7 @@ async function handleAction(control) {
       const i = ids.indexOf(id)
       const j = i + (action === 'move-up' ? -1 : 1)
       if (i >= 0 && j >= 0 && j < ids.length) [ids[i], ids[j]] = [ids[j], ids[i]]
+      pruneRequires()
       paintPicked()
       main.querySelector(`[data-action="${action}"][data-id="${CSS.escape(id)}"]:not(:disabled)`)?.focus()
       break
@@ -387,18 +431,28 @@ async function handleForm(form) {
       break
     }
     case 'course': {
-      const { course, ids } = state.editor
+      const { course, ids, requires } = state.editor
       const saved = await api('courses' + (course ? '/' + key(course.id) : ''), {
-        method: course ? 'PUT' : 'POST', body: { ...body, stageIds: ids },
+        method: course ? 'PUT' : 'POST', body: { ...body, stageIds: ids, requires },
       })
       await navigate(coursePath(saved.id), true)
       announce(course ? '课程已保存。' : '课程已创建。')
       break
     }
+    case 'requires': {
+      const stageId = form.dataset.stage
+      state.editor.requires[stageId] = data.getAll('deps')
+      pruneRequires()
+      dialog.close()
+      paintPicked()
+      announce('已记录前置关卡，保存课程后生效。')
+      break
+    }
     case 'stage': {
       const id = form.dataset.id
       const saved = await api('stages' + (id ? '/' + key(id) : ''), {
-        method: id ? 'PUT' : 'POST', body: { ...body, methods: data.getAll('methods') },
+        method: id ? 'PUT' : 'POST',
+        body: { ...body, methods: data.getAll('methods'), required: data.getAll('required') },
       })
       dialog.close()
       if (!state.editor) {
@@ -482,6 +536,13 @@ document.addEventListener('input', event => {
   if (input.matches('[data-stage-filter]')) {
     for (const option of dialog.querySelectorAll('.stage-option')) {
       option.hidden = !option.textContent.toLowerCase().includes(input.value.trim().toLowerCase())
+    }
+  }
+  if (input.matches('input[name="methods"]') && input.form?.dataset.form === 'stage') {
+    const toggle = input.form.querySelector(`input[name="required"][value="${CSS.escape(input.value)}"]`)
+    if (toggle) {
+      toggle.disabled = !input.checked
+      if (!input.checked) toggle.checked = false
     }
   }
   if (input.matches('input[type="file"]')) {

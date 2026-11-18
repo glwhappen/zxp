@@ -1,6 +1,7 @@
+import { KINDS, METHODS } from '../shared.js'
 import { checkOrigin, choice, field, json, objectBody, RequestError } from './core.js'
 import {
-  CATEGORIES, courseDetail, joinCourse, listCourses, listStages, markLearned, METHODS,
+  CATEGORIES, courseDetail, joinCourse, listCourses, listStages, markLearned,
   saveCourse, saveStage, stageDetail, THEMES,
 } from './learning.js'
 import { submitAnswer, submitFile } from './submissions.js'
@@ -19,12 +20,15 @@ const visibility = enumeration(['public', 'private'])
 const course = {
   title: string, description: string, category: enumeration(CATEGORIES), theme: enumeration(THEMES),
   visibility, stageIds: array(string),
+  requires: { type: 'object', additionalProperties: array(string),
+    description: '关卡依赖：{ 关卡 ID: [前置关卡 ID...] }。前置关卡必须排在当前关卡之前，全部学会后才能打开当前关卡。' },
 }
 const stage = {
   title: string,
   task: string,
   tutorial: { ...string, description: 'Markdown 教程。将 {{submit:answer}}、{{submit:screenshot}} 或 {{submit:file}} 放在独立段落中，安排已开启的提交框。' },
   methods: array(enumeration(METHODS)),
+  required: { ...array(enumeration(KINDS)), description: '必填的提交方式，必须是 methods 中已开启的项。必填未提交时无法标记学会。' },
   visibility,
 }
 const id = (args, key) => field(args[key], key, 100)
@@ -44,7 +48,7 @@ tool('course_list', '列出公开、自己创建或已经加入的课程。', { 
   ({ DB }, user, args) => listCourses(DB, user, args.scope), true)
 tool('course_get', '读取课程详情、关卡顺序和当前用户的学习进度。', { courseId: string }, ['courseId'],
   ({ DB }, user, args) => courseDetail(DB, user, id(args, 'courseId')), true)
-tool('course_create', '创建课程。stageIds 按顺序引用已有的关卡。默认私有。', course, ['title'],
+tool('course_create', '创建课程。stageIds 按顺序引用已有的关卡，requires 配置关卡依赖。默认私有。', course, ['title'],
   ({ DB }, user, args) => saveCourse(DB, user, args))
 tool('course_update', '更新自己创建的课程，保留课程 ID。先读取现有字段，再提交完整表单及 stageIds。', { courseId: string, ...course },
   ['courseId', 'title', 'description', 'category', 'theme', 'visibility', 'stageIds'],
@@ -55,7 +59,7 @@ tool('stage_list', '列出可引用的公开关卡或自己拥有的关卡。', 
   ({ DB }, user, args) => listStages(DB, user, args.scope), true)
 tool('stage_get', '读取学习任务、Markdown 教程、聚合人数与自己的提交。', { stageId: string }, ['stageId'],
   ({ DB }, user, args) => stageDetail(DB, user, id(args, 'stageId')), true)
-tool('stage_create', '创建独立的关卡。教程支持 Markdown，默认私有，每个关卡均可标记学会。', stage, ['title', 'task'],
+tool('stage_create', '创建独立的关卡。教程支持 Markdown，默认私有，required 中的提交方式必须先完成才能标记学会。', stage, ['title', 'task'],
   ({ DB }, user, args) => saveStage(DB, user, args))
 tool('stage_update', '更新自己创建的关卡。先读取现有字段，再提交完整表单。', { stageId: string, ...stage },
   ['stageId', 'title', 'task', 'tutorial', 'methods', 'visibility'],

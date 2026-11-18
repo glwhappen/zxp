@@ -1,4 +1,5 @@
 import DOMPurify from 'dompurify'
+import { kindLabels, LABELS } from '../shared.js'
 import { icon } from './icons.js'
 import { layoutTutorial, submissionKinds } from './tutorial.js'
 
@@ -8,10 +9,10 @@ export const key = encodeURIComponent
 export const categories = ['AI 创作', '编程开发', '效率工具', '产品设计', '其他']
 export const themes = { violet: '紫色', peach: '暖橙', blue: '蓝色', mint: '绿色' }
 export const methods = {
-  learned: ['学会了', 'check'],
-  answer: ['文本答案', 'text'],
-  screenshot: ['截图上传', 'image'],
-  file: ['文件上传', 'file'],
+  learned: [LABELS.learned, 'check'],
+  answer: [LABELS.answer, 'text'],
+  screenshot: [LABELS.screenshot, 'image'],
+  file: [LABELS.file, 'file'],
 }
 export const coursePath = id => '/course/' + key(id)
 export const stagePath = (id, course) => course ? coursePath(course.id) + '/stage/' + key(id) : '/stage/' + key(id)
@@ -93,12 +94,18 @@ export function coursePage(course, user) {
 }
 
 export function outline(course, active) {
-  return course.stages.length ? `<ol class="outline">${course.stages.map((stage, i) =>
-    `<li><a href="${stagePath(stage.id, course)}" data-link ${active === stage.id ? 'aria-current="page"' : ''}>
-      <span class="step-number ${stage.learned ? 'done' : ''}">${stage.learned ? icon('check', 16) : i + 1}</span>
-      <span class="step-text"><strong>${esc(stage.title)}</strong>${active ? '' : `<small>${esc(stage.task)}</small>`}</span>
-      ${icon('chevron', 16)}
-    </a></li>`).join('')}</ol>` : note('这门课还没有关卡。')
+  const titles = new Map(course.stages.map(stage => [stage.id, stage.title]))
+  return course.stages.length ? `<ol class="outline">${course.stages.map((stage, i) => {
+    const number = `<span class="step-number ${stage.learned ? 'done' : ''}">${stage.learned ? icon('check', 16) : i + 1}</span>`
+    if (stage.locked) {
+      const waiting = (stage.requires ?? []).filter(id => !course.stages.find(item => item.id === id)?.learned)
+      return `<li class="locked"><span class="step-number">${icon('lock', 15)}</span>
+        <span class="step-text"><strong>${esc(stage.title)}</strong><small>需先学会：${esc(waiting.map(id => titles.get(id) ?? id).join('、'))}</small></span></li>`
+    }
+    return `<li><a href="${stagePath(stage.id, course)}" data-link ${active === stage.id ? 'aria-current="page"' : ''}>
+      ${number}<span class="step-text"><strong>${esc(stage.title)}</strong>${active ? '' : `<small>${esc(stage.task)}</small>`}</span>
+      ${icon('chevron', 16)}</a></li>`
+  }).join('')}</ol>` : note('这门课还没有关卡。')
 }
 
 export function stageStats(stage) {
@@ -109,14 +116,21 @@ export function stageStats(stage) {
 
 export function submission(stage, kind) {
   if (kind === 'learned') {
-    return button('learned', stage.learned ? '已学会 · 撤销' : '标记学会了', stage.learned ? 'btn done' : 'btn', 'check')
+    const missing = stage.missing ?? []
+    const blocked = !stage.learned && missing.length > 0
+    const label = stage.learned ? '已学会 · 撤销' : blocked ? '请先完成必填项' : '标记学会了'
+    const attrs = blocked ? `disabled title="必填提交：${esc(kindLabels(missing))} 尚未完成"` : ''
+    return button('learned', label, stage.learned ? 'btn done' : 'btn', 'check', attrs)
+      + (blocked ? `<p class="submit-hint">必填：${esc(kindLabels(missing))}</p>` : '')
   }
   const current = stage.submissions.find(entry => entry.kind === kind)
   const allowed = stage.methods.includes(kind)
   if (!current && !allowed) return ''
+  const required = stage.required?.includes(kind)
   const [label, symbol] = methods[kind]
   const uploaded = `/api/stages/${key(stage.id)}/upload/${kind}`
-  const title = `<div class="submit-title">${icon(symbol, 19)}<h3>${label}</h3>${current ? '<span class="saved">已提交</span>' : ''}</div>`
+  const title = `<div class="submit-title">${icon(symbol, 19)}<h3>${label}</h3>${required ? '<span class="saved required">必填</span>' : ''}${current ? '<span class="saved">已提交</span>' : ''}</div>`
+    + (required && !current ? '<p class="submit-hint">这是必填提交，完成后才能标记学会了。</p>' : '')
   if (kind === 'answer') {
     return `<form class="submission" data-form="answer">${title}
       <textarea name="answer" aria-label="文本答案" maxlength="20000" rows="4" placeholder="写下你的练习答案或学习记录…" required ${allowed ? '' : 'readonly'}>${esc(current?.answer)}</textarea>
@@ -157,18 +171,35 @@ function tutorialPanel(stage) {
   </section>`
 }
 
-export function stagePage(stage, course) {
-  return `<p class="breadcrumb">${course ? link(coursePath(course.id), esc(course.title), 'back', 'left') : link('/stages', '关卡库', 'back', 'left')}</p>
-    <div class="learning-layout ${course ? '' : 'standalone'}">
-      <article class="lesson">
+export function stagePage(stage, course, entry) {
+  const number = course ? course.stages.findIndex(item => item.id === stage.id) + 1 : null
+  const titles = new Map((course?.stages ?? []).map(item => [item.id, item.title]))
+  const waiting = (entry?.requires ?? [])
+    .filter(id => !course.stages.find(item => item.id === id)?.learned)
+    .map(id => titles.get(id) ?? id)
+  const locked = Boolean(entry?.locked)
+  const lesson = locked ? `<article class="lesson">
+      <header class="lesson-header">
+        <div class="lesson-kicker">${icon('lock', 17)} 关卡 ${number} / ${course.stageCount}</div>
+        <div class="section-head"><h1>${esc(stage.title)}</h1></div>
+      </header>
+      <section class="locked-panel">${icon('lock', 27)}
+        <h2>关卡尚未解锁</h2>
+        <p>先学会${waiting.map(title => `「${esc(title)}」`).join('、')}，再回到这里继续。</p>
+        ${link(coursePath(course.id), '返回课程关卡', 'btn primary', 'layers')}
+      </section>
+    </article>` : `<article class="lesson">
         <header class="lesson-header">
-          <div class="lesson-kicker">${icon('layers', 17)} ${course ? `关卡 ${course.stages.findIndex(item => item.id === stage.id) + 1} / ${course.stageCount}` : '独立关卡'}</div>
+          <div class="lesson-kicker">${icon('layers', 17)} ${course ? `关卡 ${number} / ${course.stageCount}` : '独立关卡'}</div>
           <div class="section-head"><h1>${esc(stage.title)}</h1>${stage.owned ? button('edit-stage', '编辑', 'btn', 'pen') : ''}</div>
-          <div class="lesson-status"><div class="stats" data-stage-stats>${stageStats(stage)}</div>${submissionSlot(stage, 'learned')}</div>
+          <div class="lesson-status"><div class="stats" data-stage-stats>${stageStats(stage)}</div><div data-submission="learned">${submission(stage, 'learned')}</div></div>
         </header>
         <section class="task-box"><h2>${icon('target', 20)} 学习任务</h2><p>${esc(stage.task)}</p></section>
         ${tutorialPanel(stage)}
-      </article>
+      </article>`
+  return `<p class="breadcrumb">${course ? link(coursePath(course.id), esc(course.title), 'back', 'left') : link('/stages', '关卡库', 'back', 'left')}</p>
+    <div class="learning-layout ${course ? '' : 'standalone'}">
+      ${lesson}
       ${course ? `<aside class="lesson-outline"><h2>本课关卡</h2><div data-outline>${progress(course)}${outline(course, stage.id)}</div></aside>` : ''}
     </div>`
 }
@@ -178,11 +209,17 @@ const options = (choices, selected) => choices.map(([value, name]) =>
 const visOptions = value => options([['private', '私有'], ['public', '公开']], value)
 
 export function pickedStages(editor) {
+  const titles = new Map(editor.available.map(stage => [stage.id, stage.title]))
+  const position = new Map(editor.ids.map((id, index) => [id, index]))
   return editor.ids.length ? `<ol class="manage-stages">${editor.ids.map((id, index) => {
     const stage = editor.available.find(stage => stage.id === id)
     const attrs = `data-id="${esc(id)}"`
+    const deps = (editor.requires?.[id] ?? []).filter(dep => position.has(dep) && position.get(dep) < index)
+    const depNote = deps.length
+      ? `<small class="dep-note">${icon('lock', 13)} 需先学会：${esc(deps.map(dep => titles.get(dep) ?? dep).join('、'))}</small>` : ''
     return `<li><span class="step-number">${index + 1}</span><div class="step-text"><strong>${esc(stage?.title ?? id)}</strong>
-      <small>${stage?.visibility === 'public' ? '公开' : '私有'}${stage?.owned ? ' · 我的关卡' : ` · ${esc(stage?.author)}`}</small></div>
+      <small>${stage?.visibility === 'public' ? '公开' : '私有'}${stage?.owned ? ' · 我的关卡' : ` · ${esc(stage?.author)}`}</small>${depNote}</div>
+      ${index > 0 ? button('pick-deps', '', 'icon-btn', 'lock', `${attrs} aria-label="设置前置关卡" title="前置关卡"`) : ''}
       ${stage?.owned ? button('edit-stage', '', 'icon-btn', 'pen', `${attrs} aria-label="编辑关卡" title="编辑关卡"`) : ''}
       ${button('move-up', '', 'icon-btn', 'up', `${attrs} aria-label="上移" ${index === 0 ? 'disabled' : ''}`)}
       ${button('move-down', '', 'icon-btn', 'down', `${attrs} aria-label="下移" ${index === editor.ids.length - 1 ? 'disabled' : ''}`)}
@@ -222,8 +259,16 @@ export function stageEditor(stage) {
       <p class="subtle" data-placement-status role="status">将光标放在练习题后，插入对应的提交框。</p>
       <div class="inline-actions">${submissionKinds.map(kind => button('insert-submission', '插入' + methods[kind][0], 'btn', methods[kind][1], `data-kind="${kind}"`)).join('')}</div>
     </div>
-    <fieldset><legend>提交方式</legend><div class="checks">${Object.entries(methods).map(([value, [label]]) =>
-      `<label><input type="checkbox" name="methods" value="${value}" ${(stage?.methods ?? ['learned']).includes(value) ? 'checked' : ''} ${value === 'learned' ? 'disabled' : ''}> ${label}</label>`).join('')}</div></fieldset>
+    <fieldset><legend>提交方式</legend><div class="method-rows">${Object.entries(methods).map(([value, [label]]) => {
+      if (value === 'learned') {
+        return `<div class="method-row"><label><input type="checkbox" name="methods" value="learned" checked disabled> ${label}</label><span class="subtle">完成关卡时使用</span></div>`
+      }
+      const on = (stage?.methods ?? ['learned']).includes(value)
+      const must = on && (stage?.required ?? []).includes(value)
+      return `<div class="method-row"><label><input type="checkbox" name="methods" value="${value}" ${on ? 'checked' : ''}> ${label}</label>
+        <label class="required-toggle"><input type="checkbox" name="required" value="${value}" ${must ? 'checked' : ''} ${on ? '' : 'disabled'}> 必填</label></div>`
+    }).join('')}</div>
+    <p class="subtle">必填项必须先提交，学习者才能标记学会了。</p></fieldset>
     <label>可见性<select name="visibility">${visOptions(stage?.visibility)}</select></label>
     <div class="form-error" role="alert" hidden></div><div class="submit-row"><button class="btn primary">${stage ? '保存关卡' : '创建关卡'}</button></div>
   </form>`
