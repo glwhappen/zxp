@@ -37,11 +37,11 @@ export function adminPage({ counts, courses, users, settings, q }) {
           <thead><tr><th>课程</th><th>状态</th><th>标签</th><th>操作</th></tr></thead>
           <tbody>${courses.map(course => `<tr><td><strong>${esc(course.title)}</strong><small>${esc(course.author)}</small></td>
             <td>${course.moderated_at ? '已下架' : course.visibility === 'public' ? '公开' : '私有'}</td>
-            <td class="admin-labels">${(course.labels ?? []).map(key => `<span class="label label-${key}">${esc(COURSE_LABELS[key]?.name ?? key)}</span>`).join('') || '<span class="subtle">—</span>'}</td>
-            <td class="admin-actions">${button('admin-course', course.moderated_at ? '恢复' : '下架', 'btn', null,
+            <td><div class="admin-labels">${(course.labels ?? []).map(key => `<span class="label label-${key}">${esc(COURSE_LABELS[key]?.name ?? key)}</span>`).join('') || '<span class="subtle">—</span>'}</div></td>
+            <td><div class="admin-actions">${button('admin-course', course.moderated_at ? '恢复' : '下架', 'btn', null,
               `data-id="${esc(course.id)}" data-hidden="${!course.moderated_at}"`)}
               ${button('admin-featured', (course.labels ?? []).includes('featured') ? '取消精品' : '设为精品', 'btn', null,
-                `data-id="${esc(course.id)}" data-featured="${!(course.labels ?? []).includes('featured')}"`)}</td></tr>`).join('')}</tbody>
+                `data-id="${esc(course.id)}" data-featured="${!(course.labels ?? []).includes('featured')}"`)}</div></td></tr>`).join('')}</tbody>
         </table></div>` : note('没有符合条件的课程。')}
       </section>
       <section class="outline-card">

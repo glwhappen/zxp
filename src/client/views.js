@@ -201,6 +201,17 @@ function askSlot(stage, field, signedIn = true) {
   </div>`
 }
 
+function markdownBlock(html) {
+  const safe = DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea', 'style', 'iframe'],
+    FORBID_ATTR: ['style', 'id', 'class'],
+    ALLOW_DATA_ATTR: false,
+  })
+  // 宽表格在窄屏上横向滚动，而不是把整页撑开
+  return `<div class="markdown">${safe.replace(/<table>/g, '<div class="table-wrap"><table>').replace(/<\/table>/g, '</table></div>')}</div>`
+}
+
 function tutorialPanel(stage, signedIn) {
   const kinds = submissionKinds.filter(kind => stage.methods.includes(kind) || stage.submissions.some(entry => entry.kind === kind))
   if (!stage.tutorial) {
@@ -210,12 +221,7 @@ function tutorialPanel(stage, signedIn) {
 
   const { blocks } = layoutTutorial(stage.tutorial, kinds)
   const content = blocks.map(block => block.kind ? submissionSlot(stage, block.kind, block.prompt)
-    : block.field ? askSlot(stage, block.field, signedIn) : `<div class="markdown">${DOMPurify.sanitize(block.html, {
-    USE_PROFILES: { html: true },
-    FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea', 'style', 'iframe'],
-    FORBID_ATTR: ['style', 'id', 'class'],
-    ALLOW_DATA_ATTR: false,
-  })}</div>`).join('')
+    : block.field ? askSlot(stage, block.field, signedIn) : markdownBlock(block.html)).join('')
   // 提交框只出现在作者手动占位的位置；没写 {{submit:...}} 就不显示任何提交框。
   return `<section class="lesson-panel lesson-tutorial"><h2>${icon('book', 20)} 教程</h2>
     ${blocks.some(block => block.kind) ? '<p class="subtle submission-intro">看到提交框就可以填写，也可以之后回来修改。</p>' : ''}
