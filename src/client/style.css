@@ -213,6 +213,19 @@ dialog::backdrop { background: #24153970; backdrop-filter: blur(3px); }
 .login-providers { display: grid; gap: 8px; }
 .login-providers + form { padding-top: 14px; border-top: 1px solid var(--line); }
 .account-name + p, .account-id { overflow-wrap: anywhere; }
+.editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 10px; }
+[data-course-save-status], [data-lesson-save-status] { color: var(--muted); font-size: 14px; }
+[data-course-save-status][data-error], [data-lesson-save-status][data-error] { color: #943047; }
+.collaborator-picker, [data-collaborator-choices] { display: grid; gap: 9px; }
+.collaborator-picker .inline-actions { flex-wrap: nowrap; }
+.collaborator-picker input { min-width: 0; }
+.collaborator-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.collaborator-pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-dark); padding: 4px 4px 4px 9px; }
+.collaborator-pill .icon-btn { width: 26px; height: 26px; min-height: 0; min-width: 0; border-radius: 50%; }
+.course-version-list { list-style: none; padding: 0; }
+.course-version-list li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+.course-version-preview { display: grid; gap: 10px; }
+.course-version-preview p { white-space: pre-wrap; overflow-wrap: anywhere; }
 .wish-filters { margin: 0 0 12px; }
 .wish-list, .wish-thread, .wish-course-list { padding: 0; list-style: none; }
 .wish-list { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }

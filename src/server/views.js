@@ -15,7 +15,7 @@ export async function readView(request, env, user, settings, path) {
     if (!section) return { type: 'explore', courses: await listCourses(db, user) }
     if ((section === 'owned' || section === 'learning') && !id) {
       const scope = section === 'owned' ? 'owned' : 'joined'
-      return { type: 'shelf', scope, courses: user ? await listCourses(db, user, scope) : [] }
+      return { type: 'shelf', scope, courses: user ? await listCourses(db, user, scope === 'owned' ? 'managed' : scope) : [] }
     }
     if (section === 'stages' && !id) return { type: 'library', stages: await listStages(db, user) }
     if (section === 'wishes' && !action) {
@@ -30,14 +30,17 @@ export async function readView(request, env, user, settings, path) {
     }
     if (section === 'course' && ((id === 'new' && !action) || (id && action === 'edit' && !stageId))) {
       if (!user) return { type: 'sign-in', message: '登录后可以创建和编辑课程。' }
-      const [course, available] = await Promise.all([action ? courseDetail(db, user, id) : null, listStages(db, user)])
-      if (course && !course.owned) fail(403, '只有课程作者可以编辑课程。')
-      return { type: 'editor', course, available }
+      const [course, stages] = await Promise.all([action ? courseDetail(db, user, id) : null, listStages(db, user)])
+      if (course && !course.canEdit) fail(403, '当前账号没有课程编辑权限。')
+      const allowed = !course || course.owned ? stages : stages.filter(stage => stage.visibility === 'public')
+      const available = new Map(allowed.map(stage => [stage.id, stage]))
+      for (const stage of course?.stages ?? []) available.set(stage.id, { ...available.get(stage.id), ...stage })
+      return { type: 'editor', course, available: [...available.values()] }
     }
     if (section === 'course' && id && !action) return { type: 'course', course: await courseDetail(db, user, id) }
     if (section === 'stage' && id && !action) return { type: 'stage', course: null, stage: await stageDetail(db, user, id) }
     if (section === 'course' && id && action === 'stage' && stageId && !extra) {
-      const [course, stage] = await Promise.all([courseDetail(db, user, id), stageDetail(db, user, stageId)])
+      const [course, stage] = await Promise.all([courseDetail(db, user, id), stageDetail(db, user, stageId, id)])
       if (!course.stages.some(item => item.id === stage.id)) fail(404, '这门课程未引用该关卡。')
       return { type: 'stage', course, stage }
     }

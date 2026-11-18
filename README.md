@@ -7,6 +7,7 @@
     <a href="https://skill-workshop-learning.mixedbobcat1.chatgpt.site">私人试用</a>
     · <a href="#快速开始">快速开始</a>
     · <a href="#创建课程">创建课程</a>
+    · <a href="#课程协作与历史">课程协作与历史</a>
     · <a href="#课程许愿">课程许愿</a>
     · <a href="#账号与管理">账号与管理</a>
     · <a href="#mcp-接入">MCP 接入</a>
@@ -66,6 +67,14 @@ npm run dev
 | **人数与隐私** | 统计按账号去重，参与人数包含标记学会或提交过作业的用户。提交内容与附件仅本人可见，其他用户看到聚合人数。 |
 
 </details>
+
+## 课程协作与历史
+
+在课程编辑页打开「共享设置」，选择**仅作者**、**指定账号**或**所有登录用户**。指定协作者可以在「我的创作」看到共享课程。开放协作会公开课程，课程须使用公开关卡。作者可以随时调整共享名单和可见性。
+
+编辑停顿后会自动保存。其他人刚保存时，页面会保留当前草稿并提示加载最新版；可以先复制自己的修改，加载后再合并。协作者可以编排关卡并编辑本课程里的讲义，同一关卡的学习进度和提交仍跨课程同步。
+
+「历史版本」记录关卡编排变更前的版本、间隔存档和手动存档。点击「保存一个版本」可以留下当前进度。恢复会还原课程资料、关卡顺序和讲义，并在恢复前留档。共享设置和学员记录沿用恢复时的状态。
 
 ## 课程许愿
 
@@ -127,8 +136,11 @@ Sites 的私人访问限制在应用登录页面前生效。要让其他人在�
 
 | 工具 | 用途 |
 | --- | --- |
-| `course_list`、`course_get` | 浏览公开、自己的或已加入的课程，查看关卡顺序和进度 |
+| `course_list`、`course_get` | 浏览公开、自己的、指定账号共享的或已加入的课程，查看关卡顺序和进度 |
 | `course_create`、`course_update`、`course_join` | 创建、更新或加入课程 |
+| `course_sharing_get`、`course_sharing_search`、`course_sharing_set` | 读取权限、搜索账号、管理协作者 |
+| `course_versions`、`course_version_get`、`course_restore` | 查看、预览和恢复课程存档 |
+| `course_lesson_update`、`course_stage_create` | 修改课内讲义，或在课程末尾创建关卡 |
 | `stage_list`、`stage_get` | 查找可引用关卡，读取教程、统计和自己的提交 |
 | `stage_create`、`stage_update` | 创建或更新独立关卡 |
 | `stage_mark_learned`、`stage_submit_answer`、`stage_submit_file` | 切换学会状态，提交答案或附件 |
@@ -136,7 +148,7 @@ Sites 的私人访问限制在应用登录页面前生效。要让其他人在�
 | `wish_create`、`wish_reply`、`wish_link_course` | 发布许愿、回复和关联公开课程 |
 | `wish_rate_course`、`wish_set_status` | 由许愿者评价关联课程、完结或重新打开 |
 
-- 更新课程或关卡时，先读取记录，再传入完整表单。
+- 更新课程时，先读取记录，再传入完整表单和当前 `revision`（作为 `expectedRevision`）。需要手动存档时传入 `checkpoint: true`。
 - 在 Markdown 教程的独立段落插入 `{{submit:answer}}`、`{{submit:screenshot}}` 或 `{{submit:file}}`，并在 `methods` 中开启对应方式。
 - 上传使用标准 Base64，单文件编码前最多 2 MiB。
 - 支持 `server/discover` 和早期客户端使用的 `initialize`。协议见 [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)。

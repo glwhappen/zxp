@@ -43,7 +43,7 @@ export function card(course, scope) {
   return `<a class="course-card" href="${coursePath(course.id)}" data-link>
     <div class="card-cover theme-${theme(course)}"><span class="cover-icon">${icon(topicIcon(course), 28)}</span><span class="cover-orbit"></span></div>
     <div class="card-content">
-      <div class="card-tag">${esc(course.category)}${scope === 'owned' ? visibility(course.visibility) : ''}${course.moderated_at ? '<span class="visibility">已下架</span>' : ''}</div>
+      <div class="card-tag">${esc(course.category)}${scope === 'owned' ? visibility(course.visibility) : ''}${scope === 'owned' && !course.owned ? '<span class="visibility">协作课程</span>' : ''}${course.moderated_at ? '<span class="visibility">已下架</span>' : ''}</div>
       <h3>${esc(course.title)}</h3>
       <p>${esc(course.description)}</p>
       ${scope === 'joined' ? progress(course) : ''}
@@ -82,7 +82,7 @@ export function coursePage(course, user) {
       <div class="intro-actions">
         ${next ? link(stagePath(next.id, course), course.completedCount ? '继续学习' : '开始学习', 'btn primary', 'play') : ''}
         ${!course.joined && !course.owned ? button('join', '加入我的学习', 'btn', 'plus') : ''}
-        ${course.owned ? link(coursePath(course.id) + '/edit', '编辑课程', 'btn', 'pen') : ''}
+        ${course.canEdit ? link(coursePath(course.id) + '/edit', '编辑课程', 'btn', 'pen') : ''}
       </div>
     </section>
     <section class="outline-card">
@@ -163,7 +163,8 @@ export function stagePage(stage, course) {
       <article class="lesson">
         <header class="lesson-header">
           <div class="lesson-kicker">${icon('layers', 17)} ${course ? `关卡 ${course.stages.findIndex(item => item.id === stage.id) + 1} / ${course.stageCount}` : '独立关卡'}</div>
-          <div class="section-head"><h1>${esc(stage.title)}</h1>${stage.owned ? button('edit-stage', '编辑', 'btn', 'pen') : ''}</div>
+          <div class="section-head"><h1>${esc(stage.title)}</h1>${stage.owned ? button('edit-stage', course ? '编辑原关卡' : '编辑', 'btn', 'pen',
+            `data-id="${esc(stage.id)}"`) : ''}</div>
           <div class="lesson-status"><div class="stats" data-stage-stats>${stageStats(stage)}</div>${submissionSlot(stage, 'learned')}</div>
         </header>
         <section class="task-box"><h2>${icon('target', 20)} 学习任务</h2><p>${esc(stage.task)}</p></section>
@@ -183,7 +184,9 @@ export function pickedStages(editor) {
     const attrs = `data-id="${esc(id)}"`
     return `<li><span class="step-number">${index + 1}</span><div class="step-text"><strong>${esc(stage?.title ?? id)}</strong>
       <small>${stage?.visibility === 'public' ? '公开' : '私有'}${stage?.owned ? ' · 我的关卡' : ` · ${esc(stage?.author)}`}</small></div>
-      ${stage?.owned ? button('edit-stage', '', 'icon-btn', 'pen', `${attrs} aria-label="编辑关卡" title="编辑关卡"`) : ''}
+      ${editor.course ? button('edit-course-lesson', '', 'icon-btn', 'pen',
+        `${attrs} aria-label="编辑课程讲义" title="编辑课程讲义"`)
+        : stage?.owned ? button('edit-stage', '', 'icon-btn', 'pen', `${attrs} aria-label="编辑关卡" title="编辑关卡"`) : ''}
       ${button('move-up', '', 'icon-btn', 'up', `${attrs} aria-label="上移" ${index === 0 ? 'disabled' : ''}`)}
       ${button('move-down', '', 'icon-btn', 'down', `${attrs} aria-label="下移" ${index === editor.ids.length - 1 ? 'disabled' : ''}`)}
       ${button('remove-stage', '', 'icon-btn', 'close', `${attrs} aria-label="移除关卡" title="移除关卡"`)}</li>`
@@ -193,7 +196,14 @@ export function pickedStages(editor) {
 export function courseEditor(editor) {
   const item = editor.course ?? {}
   return `<p class="breadcrumb">${link(item.id ? coursePath(item.id) : '/owned', item.id ? '返回课程' : '我的创作', 'back', 'left')}</p>
-    <div class="page-heading"><h1>${item.id ? '编辑课程' : '创建课程'}</h1><p>编排关卡，搭建一条可以反复练习的学习路径。</p></div>
+    <div class="page-heading"><h1>${item.id ? '编辑课程' : '创建课程'}</h1>
+      ${item.id ? `<div class="editor-toolbar">
+        <span data-course-save-status role="status">已保存</span>
+        ${item.owned ? button('course-sharing', '共享设置', 'btn', 'users') : ''}
+        ${button('course-history', '历史版本', 'btn', 'layers')}
+        ${button('reload-course', '放弃草稿并加载最新版', 'btn', null, 'data-course-reload hidden')}
+      </div>` : '<p>编排关卡，搭建一条可以反复练习的学习路径。</p>'}
+    </div>
     <form class="editor form-panel" data-form="course">
       <h2>课程信息</h2>
       <label>课程名称<input name="title" maxlength="100" required value="${esc(item.title)}" placeholder="例如，AI 视频创作工作流"></label>
@@ -201,7 +211,7 @@ export function courseEditor(editor) {
       <div class="form-columns">
         <label>课程分类<select name="category">${options(categories.map(name => [name, name]), item.category ?? 'AI 创作')}</select></label>
         <label>主题色<select name="theme">${options(Object.entries(themes), item.theme ?? 'violet')}</select></label>
-        <label>可见性<select name="visibility">${visOptions(item.visibility)}</select></label>
+        ${!item.id || item.owned ? `<label>可见性<select name="visibility">${visOptions(item.visibility)}</select></label>` : ''}
       </div>
       <div class="editor-divider"></div>
       <div class="section-head editor-heading"><h2>课程关卡</h2><div class="inline-actions">
@@ -209,22 +219,27 @@ export function courseEditor(editor) {
       </div></div>
       <div data-picked-stages>${pickedStages(editor)}</div>
       <p class="subtle">同一个关卡可以出现在多门课里。发布课程前，先公开其中所有关卡。</p>
-      <div class="form-error" role="alert" hidden></div><div class="submit-row"><button class="btn primary">${item.id ? '保存课程' : '创建课程'}</button></div>
+      <div class="form-error" role="alert" hidden></div><div class="submit-row"><button class="btn primary">${item.id ? '保存一个版本' : '创建课程'}</button></div>
     </form>`
 }
 
-export function stageEditor(stage) {
-  return `<form data-form="stage" data-id="${esc(stage?.id)}">
+export function stageEditor(stage, mode = 'stage') {
+  const lesson = mode === 'course-lesson'
+  return `<form data-form="${mode}" data-id="${esc(stage?.id)}">
     <label>关卡名称<input name="title" required maxlength="100" value="${esc(stage?.title)}"></label>
     <label>学习任务<textarea name="task" required maxlength="5000" rows="2" placeholder="描述一个可以完成的任务">${esc(stage?.task)}</textarea></label>
     <label>教程 <span class="subtle">支持 Markdown</span><textarea name="tutorial" rows="6" maxlength="35000" placeholder="练习步骤、示例和参考链接">${esc(stage?.tutorial)}</textarea></label>
     <div class="placement-tools">
       <p class="subtle" data-placement-status role="status">将光标放在练习题后，插入对应的提交框。</p>
-      <div class="inline-actions">${submissionKinds.map(kind => button('insert-submission', '插入' + methods[kind][0], 'btn', methods[kind][1], `data-kind="${kind}"`)).join('')}</div>
+      <div class="inline-actions">${submissionKinds.filter(kind => !lesson || stage.methods.includes(kind))
+        .map(kind => button('insert-submission', '插入' + methods[kind][0], 'btn', methods[kind][1], `data-kind="${kind}"`)).join('')}</div>
     </div>
-    <fieldset><legend>提交方式</legend><div class="checks">${Object.entries(methods).map(([value, [label]]) =>
-      `<label><input type="checkbox" name="methods" value="${value}" ${(stage?.methods ?? ['learned']).includes(value) ? 'checked' : ''} ${value === 'learned' ? 'disabled' : ''}> ${label}</label>`).join('')}</div></fieldset>
-    <label>可见性<select name="visibility">${visOptions(stage?.visibility)}</select></label>
-    <div class="form-error" role="alert" hidden></div><div class="submit-row"><button class="btn primary">${stage ? '保存关卡' : '创建关卡'}</button></div>
+    ${lesson ? '<p class="subtle">这份讲义在当前课程显示。学习状态和提交按关卡共享。</p>'
+      : `<fieldset><legend>提交方式</legend><div class="checks">${Object.entries(methods).map(([value, [label]]) =>
+        `<label><input type="checkbox" name="methods" value="${value}" ${(stage?.methods ?? ['learned']).includes(value) ? 'checked' : ''} ${value === 'learned' ? 'disabled' : ''}> ${label}</label>`).join('')}</div></fieldset>`}
+    ${mode === 'stage' ? `<label>可见性<select name="visibility">${visOptions(stage?.visibility)}</select></label>` : ''}
+    ${lesson ? `<span data-lesson-save-status role="status">已保存</span>
+      ${button('reload-course', '放弃草稿并加载最新版', 'btn', null, 'data-lesson-reload hidden')}` : ''}
+    <div class="form-error" role="alert" hidden></div><div class="submit-row"><button class="btn primary">${lesson ? '完成' : stage ? '保存关卡' : '创建关卡'}</button></div>
   </form>`
 }

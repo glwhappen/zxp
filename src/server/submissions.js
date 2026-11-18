@@ -3,14 +3,14 @@ import { joinFromStage, readableStage, stageDetail } from './learning.js'
 
 export const FILE_LIMIT = 10 * 1024 * 1024
 
-async function allowSubmission(db, user, stageId, kind) {
+async function allowSubmission(db, user, stageId, kind, courseId) {
   requireUser(user)
-  const stage = await readableStage(db, user, stageId)
+  const stage = await readableStage(db, user, stageId, courseId)
   if (!stage.methods.includes(kind)) fail(409, '当前关卡未开启这种提交方式。')
 }
 
 export async function submitAnswer(db, user, stageId, answer, courseId) {
-  await allowSubmission(db, user, stageId, 'answer')
+  await allowSubmission(db, user, stageId, 'answer', courseId)
   await statement(db, `
     INSERT INTO submissions (stage_id, user_id, kind, answer)
     VALUES (?, ?, 'answer', ?)
@@ -18,7 +18,7 @@ export async function submitAnswer(db, user, stageId, answer, courseId) {
     SET answer = excluded.answer, updated_at = CURRENT_TIMESTAMP
   `, stageId, user.id, field(answer, '答案', 20_000)).run()
   await joinFromStage(db, user, courseId, stageId)
-  return stageDetail(db, user, stageId)
+  return stageDetail(db, user, stageId, courseId)
 }
 
 function imageType(bytes) {
@@ -37,7 +37,7 @@ async function removeObject(bucket, key) {
 
 export async function submitFile(env, user, stageId, kind, filename, bytes, courseId) {
   const { DB: db, BUCKET: bucket } = env
-  await allowSubmission(db, user, stageId, kind)
+  await allowSubmission(db, user, stageId, kind, courseId)
   if (!bytes.length || bytes.length > FILE_LIMIT) fail(400, '文件大小须大于 0 且不超过 10 MB。')
   filename = field(filename, '文件名', 220).replace(/[\u0000-\u001f\u007f/\\]/g, '_')
   const mime = kind === 'screenshot' ? imageType(bytes) : 'application/octet-stream'
@@ -62,7 +62,7 @@ export async function submitFile(env, user, stageId, kind, filename, bytes, cour
   }
   await removeObject(bucket, previous?.object_key)
   await joinFromStage(db, user, courseId, stageId)
-  return stageDetail(db, user, stageId)
+  return stageDetail(db, user, stageId, courseId)
 }
 
 export async function downloadFile(env, user, stageId, kind, preview) {

@@ -1,6 +1,8 @@
 import { icon } from './icons.js'
 import { adminPage, providerNames } from './admin.js'
 import { createViewCache } from './view-cache.js'
+import { createCourseAutosave } from './course-autosave.js'
+import { courseHistory, courseSharingForm, courseVersionPreview, editorChoices } from './collaboration.js'
 import { wishBoard, wishCoursePicker, wishCourses, wishDiscussion, wishForm, wishHeading, wishPage, wishPath } from './wishes.js'
 import { hasSubmissionMarker, submissionKinds, submissionMarker } from './tutorial.js'
 import {
@@ -48,6 +50,7 @@ async function refreshIdentity() {
 }
 
 function applyProfile(profile) {
+  if (state.user?.id !== profile.user?.id) state.editor?.autosave?.discard()
   views.acceptIdentity(profile.user?.id ?? null)
   Object.assign(state, profile)
 }
@@ -205,10 +208,10 @@ function courseShelf(courses, scope) {
   const own = scope === 'owned'
   const action = own ? button('create-course', '创建课程', 'btn primary', 'plus') : link('/', '探索课程', 'btn primary', 'compass')
   main.innerHTML = `<div class="page-heading section-head"><div><h1>${own ? '我的创作' : '我的学习'}</h1>
-    <p>${own ? '管理你创建的课程，随时编辑内容或公开分享。' : '继续已加入的课程，查看跨课程同步的关卡进度。'}</p></div>${action}</div>
+    <p>${own ? '管理你创建的课程，以及与你共享的协作课程。' : '继续已加入的课程，查看跨课程同步的关卡进度。'}</p></div>${action}</div>
     ${!state.user ? `<div class="sign-in-panel">${note('登录后查看你的课程。', 'lock')}${button('login', '登录')}</div>`
       : courses.length ? `<div class="catalog-grid">${courses.map(course => card(course, scope)).join('')}</div>`
-        : note(own ? '你还没有创建课程。' : '加入一门课程，或完成任意关卡提交，开始记录你的学习。')}`
+        : note(own ? '这里会显示你创建的课程和协作邀请。' : '加入一门课程，或完成任意关卡提交，开始记录你的学习。')}`
 }
 
 function stagesPage(stages) {
@@ -221,6 +224,7 @@ function stagesPage(stages) {
 }
 
 function paintView({ profile, view }, path) {
+  state.editor?.autosave?.discard()
   applyProfile(profile)
   state.path = path
   state.current = null
@@ -244,8 +248,7 @@ function paintView({ profile, view }, path) {
       main.innerHTML = wishPage(view.wish, state.user)
       break
     case 'editor':
-      state.editor = { course: view.course, available: view.available, ids: view.course?.stages.map(stage => stage.id) ?? [] }
-      main.innerHTML = courseEditor(state.editor)
+      mountCourseEditor(view.course, view.available)
       break
     case 'course':
       state.current = { course: view.course }
@@ -309,6 +312,11 @@ function refreshView(path, version) {
 
 async function navigate(path = location.pathname, push = false, focus = false) {
   const version = ++navigation
+  if (state.editor?.autosave?.dirty() && !await state.editor.autosave.flush()) {
+    if (version === navigation && location.pathname !== state.path) history.pushState({}, '', state.path)
+    return
+  }
+  if (version !== navigation) return
   const cached = views.read(path)
   navigationProgress.hidden = true
   const showProgress = !cached && setTimeout(() => {
@@ -338,10 +346,84 @@ function paintPicked() {
   main.querySelector('[data-picked-stages]').innerHTML = pickedStages(state.editor)
 }
 
+function courseDraft(editor, form) {
+  const { title, description, category, theme, visibility } = Object.fromEntries(new FormData(form))
+  return { title, description, category, theme, visibility: visibility ?? editor.course?.visibility, stageIds: [...editor.ids] }
+}
+
+function lessonDraft(form) {
+  const { title, task, tutorial } = Object.fromEntries(new FormData(form))
+  return { title, task, tutorial }
+}
+
+function courseWriteBody(editor, payload) {
+  return { ...payload, expectedRevision: editor.course.revision, expectedEditorId: editor.userId }
+}
+
+function syncCourseEditor(editor, course, stage) {
+  if (editor.userId !== state.user?.id) return
+  editor.course = course
+  const updated = new Map(course.stages.map(item => [item.id, item]))
+  if (stage && !editor.available.some(item => item.id === stage.id)) editor.available.unshift(stage)
+  editor.available = editor.available.map(item => ({ ...item, ...updated.get(item.id) }))
+  views.invalidate((path, view) => view.course?.id === course.id || ['explore', 'shelf'].includes(view.type))
+  cachePage(coursePath(course.id), { type: 'course', course })
+  if (editor === state.editor) paintPicked()
+}
+
+function mountCourseEditor(course, available) {
+  const editor = { course, available, ids: course?.stages.map(stage => stage.id) ?? [], userId: state.user?.id }
+  state.editor = editor
+  main.innerHTML = courseEditor(editor)
+  if (!course) return
+  editor.autosave = createCourseAutosave({
+    status(message, kind) {
+      if (editor !== state.editor) return
+      for (const element of document.querySelectorAll('[data-course-save-status], [data-lesson-save-status]')) {
+        element.textContent = message
+        element.toggleAttribute('data-error', Boolean(kind))
+      }
+      main.querySelector('[data-course-reload]').hidden = !kind
+      const reload = dialog.querySelector('[data-lesson-reload]')
+      if (reload) reload.hidden = !kind
+    },
+    async send(target, payload) {
+      const base = 'courses/' + key(course.id)
+      const lesson = target !== 'course'
+      const saved = await api(lesson ? base + '/stages/' + key(target) : base, {
+        method: 'PUT', body: courseWriteBody(editor, payload),
+      })
+      syncCourseEditor(editor, lesson ? saved.course : saved, lesson ? saved.stage : undefined)
+    },
+  })
+  editor.autosave.remember('course', courseDraft(editor, main.querySelector('[data-form="course"]')))
+}
+
+function queueCourseDraft(form = main.querySelector('[data-form="course"]')) {
+  const editor = state.editor
+  if (!editor?.autosave || !form) return
+  if (form.dataset.form === 'course') editor.autosave.queue('course', courseDraft(editor, form))
+  if (form.dataset.form === 'course-lesson') editor.autosave.queue(form.dataset.id, lessonDraft(form))
+}
+
+async function searchCollaborators() {
+  const editor = state.editor
+  const sharing = editor.sharing
+  const query = dialog.querySelector('[data-collaborator-search]').value.trim()
+  const version = sharing.searchVersion = (sharing.searchVersion ?? 0) + 1
+  const result = query ? await api('courses/' + key(editor.course.id) + '/sharing/users?q=' + key(query)) : []
+  if (editor !== state.editor || sharing !== editor.sharing || sharing.searchVersion !== version) return
+  const choices = dialog.querySelector('[data-collaborator-choices]')
+  if (!choices) return
+  sharing.results = result
+  sharing.searched = Boolean(query)
+  choices.innerHTML = editorChoices(sharing)
+}
+
 function chooseStageDialog() {
   const entries = state.editor.available.filter(stage => !state.editor.ids.includes(stage.id))
   showDialog('引用已有的关卡', `<label>搜索关卡<input type="search" placeholder="输入名称或作者" data-stage-filter></label>
-    <p class="subtle">可以引用公开关卡，以及你自己创建的私有关卡。</p>
+    <p class="subtle">${state.editor.course && !state.editor.course.owned ? '可以引用公开关卡。' : '可以引用公开关卡和你创建的私有关卡。'}</p>
     <div class="stage-options">${entries.map(stage => `<button type="button" class="stage-option" data-action="attach-stage" data-id="${esc(stage.id)}">
       <span class="step-text"><strong>${esc(stage.title)}</strong><small>${esc(stage.author)}</small></span>
       ${visibility(stage.visibility)}${icon('plus', 17)}</button>`).join('') || note('没有更多可引用的关卡。')}</div>`, true)
@@ -365,7 +447,8 @@ function applyStage(stage, kind, context) {
   views.invalidate((path, view) => (view.type === 'shelf' && (view.scope === 'joined' || changesEnrollment))
     || (changesEnrollment && view.type === 'explore'))
   views.update(view => {
-    if (view.stage?.id === stage.id) view.stage = stage
+    if (view.stage?.id === stage.id) view.stage = { ...view.stage,
+      learned: stage.learned, submissions: stage.submissions, stats: stage.stats }
     syncCourseProgress(view.course, stage, joinedCourseId)
   })
   if (context !== state.current) return
@@ -428,6 +511,61 @@ async function handleAction(control) {
     case 'register': login(action); break
     case 'account': account(); break
     case 'retry-view': await navigate(); break
+    case 'reload-course':
+      state.editor.autosave.discard()
+      views.invalidate((path) => path === state.path)
+      await navigate()
+      break
+    case 'course-sharing': {
+      const editor = state.editor
+      if (!await editor.autosave.flush() || editor !== state.editor) break
+      const sharing = await api('courses/' + key(editor.course.id) + '/sharing')
+      if (editor !== state.editor) break
+      editor.sharing = sharing
+      showDialog('课程共享设置', courseSharingForm(sharing), true)
+      break
+    }
+    case 'find-collaborators':
+      await searchCollaborators()
+      break
+    case 'add-collaborator':
+    case 'remove-collaborator': {
+      const sharing = state.editor.sharing
+      if (action === 'add-collaborator') {
+        const user = sharing.results.find(user => user.id === id)
+        if (user && !sharing.editors.some(editor => editor.id === id)) sharing.editors.push(user)
+      } else sharing.editors = sharing.editors.filter(editor => editor.id !== id)
+      dialog.querySelector('[data-collaborator-choices]').innerHTML = editorChoices(sharing)
+      break
+    }
+    case 'course-history':
+    case 'more-course-versions': {
+      const editor = state.editor
+      const cursor = control.dataset.before ? '?before=' + key(control.dataset.before) : ''
+      const page = await api('courses/' + key(editor.course.id) + '/versions' + cursor)
+      if (editor !== state.editor) break
+      const items = cursor && editor.history ? [...editor.history.items, ...page.items] : page.items
+      editor.history = { ...page, items }
+      showDialog('课程历史版本', courseHistory(editor.history), true)
+      break
+    }
+    case 'preview-course-version': {
+      const editor = state.editor
+      const version = await api('courses/' + key(editor.course.id) + '/versions/' + key(id))
+      if (editor === state.editor) showDialog('查看版本 ' + version.revision, courseVersionPreview(version), true)
+      break
+    }
+    case 'restore-course-version': {
+      const editor = state.editor
+      if (!await editor.autosave.flush() || editor !== state.editor) break
+      const course = await api('courses/' + key(editor.course.id) + '/versions/' + key(id), {
+        method: 'POST', body: courseWriteBody(editor, {}),
+      })
+      syncCourseEditor(editor, course)
+      if (editor === state.editor) await navigate()
+      announce('历史版本已恢复。')
+      break
+    }
     case 'wish-new':
       if (requireLogin()) showDialog('发布课程许愿', wishForm(), true)
       break
@@ -547,9 +685,36 @@ async function handleAction(control) {
       announce(saved.learned ? '已标记学会。其他课程中的同一关卡已同步。' : '已撤销学会状态。')
       break
     }
-    case 'new-stage':
-      if (requireLogin()) showDialog('新建关卡', stageEditor(), true)
+    case 'new-stage': {
+      if (!requireLogin()) break
+      const editor = state.editor
+      if (editor?.course) {
+        if (await editor.autosave.flush() && editor === state.editor) {
+          showDialog('为课程新建关卡', stageEditor(null, 'course-new-stage'), true)
+        }
+      } else showDialog('新建关卡', stageEditor(), true)
       break
+    }
+    case 'edit-course-lesson': {
+      const editor = state.editor
+      const saved = await editor.autosave.flush()
+      if (editor !== state.editor) break
+      const draft = editor.autosave.draft(id)
+      if (!saved && (!draft || editor.lastLesson?.id !== id)) break
+      const stage = saved ? await api('stages/' + key(id) + '?courseId=' + key(editor.course.id))
+        : { ...editor.lastLesson, ...draft }
+      if (editor !== state.editor) break
+      editor.lastLesson = stage
+      showDialog('编辑课程讲义', stageEditor(stage, 'course-lesson'), true)
+      editor.autosave.remember(id, lessonDraft(dialog.querySelector('[data-form="course-lesson"]')))
+      if (!saved) {
+        const status = dialog.querySelector('[data-lesson-save-status]')
+        status.textContent = main.querySelector('[data-course-save-status]').textContent
+        status.setAttribute('data-error', '')
+        dialog.querySelector('[data-lesson-reload]').hidden = false
+      }
+      break
+    }
     case 'edit-stage':
       if (requireLogin()) {
         const stage = id ? await api('stages/' + key(id)) : state.current.stage
@@ -565,7 +730,7 @@ async function handleAction(control) {
       const checkbox = form.querySelector(`input[name="methods"][value="${kind}"]`)
       const marker = `\n\n${submissionMarker(kind)}\n\n`
       if (hasSubmissionMarker(tutorial.value, kind)) {
-        checkbox.checked = true
+        if (checkbox) checkbox.checked = true
         status.textContent = '教程中已有这类提交框，可移动原标记调整位置。'
         break
       }
@@ -575,9 +740,10 @@ async function handleAction(control) {
       }
       const position = tutorial.selectionEnd
       tutorial.setRangeText(marker, position, position, 'end')
-      checkbox.checked = true
+      if (checkbox) checkbox.checked = true
       status.textContent = '已插入提交框。你可以移动教程中的标记调整位置。'
       tutorial.focus()
+      queueCourseDraft(form)
       break
     }
     case 'pick-stage': chooseStageDialog(); break
@@ -585,10 +751,12 @@ async function handleAction(control) {
       state.editor.ids.push(id)
       dialog.close()
       paintPicked()
+      queueCourseDraft()
       break
     case 'remove-stage':
       state.editor.ids = state.editor.ids.filter(stageId => stageId !== id)
       paintPicked()
+      queueCourseDraft()
       break
     case 'move-up':
     case 'move-down': {
@@ -597,6 +765,7 @@ async function handleAction(control) {
       const j = i + (action === 'move-up' ? -1 : 1)
       if (i >= 0 && j >= 0 && j < ids.length) [ids[i], ids[j]] = [ids[j], ids[i]]
       paintPicked()
+      queueCourseDraft()
       main.querySelector(`[data-action="${action}"][data-id="${CSS.escape(id)}"]:not(:disabled)`)?.focus()
       break
     }
@@ -656,15 +825,52 @@ async function handleForm(form) {
       break
     }
     case 'course': {
-      const { course, ids } = state.editor
-      const saved = await api('courses' + (course ? '/' + key(course.id) : ''), {
-        method: course ? 'PUT' : 'POST', body: { ...body, stageIds: ids },
-      })
+      const editor = state.editor
+      if (editor.course) {
+        queueCourseDraft(form)
+        if (!await editor.autosave.flush() || editor !== state.editor) break
+        const saved = await api('courses/' + key(editor.course.id), {
+          method: 'PUT', body: courseWriteBody(editor, { ...courseDraft(editor, form), checkpoint: true }),
+        })
+        syncCourseEditor(editor, saved)
+        announce('已保存一个历史版本。')
+        break
+      }
+      const saved = await api('courses', { method: 'POST', body: { ...body, stageIds: editor.ids } })
       const path = coursePath(saved.id)
       views.invalidate()
       cachePage(path, { type: 'course', course: saved })
       await navigate(path, true)
-      announce(course ? '课程已保存。' : '课程已创建。')
+      announce('课程已创建。')
+      break
+    }
+    case 'course-lesson':
+      queueCourseDraft(form)
+      if (await state.editor.autosave.flush() && dialog.contains(form)) dialog.close()
+      break
+    case 'course-new-stage': {
+      const editor = state.editor
+      const { course, stage } = await api('courses/' + key(editor.course.id) + '/stages', {
+        method: 'POST', body: courseWriteBody(editor, { ...body, methods: data.getAll('methods') }),
+      })
+      editor.ids.push(stage.id)
+      syncCourseEditor(editor, course, stage)
+      if (editor === state.editor) {
+        editor.autosave.remember('course', courseDraft(editor, main.querySelector('[data-form="course"]')))
+        dialog.close()
+      }
+      announce('课程关卡已创建。')
+      break
+    }
+    case 'course-sharing': {
+      const editor = state.editor
+      const saved = await api('courses/' + key(editor.course.id) + '/sharing', {
+        method: 'PUT', body: { mode: body.mode, editorIds: editor.sharing.editors.map(user => user.id),
+          expectedRevision: editor.sharing.revision, expectedEditorId: editor.userId },
+      })
+      syncCourseEditor(editor, saved)
+      if (editor === state.editor) await navigate()
+      announce('课程共享已更新。')
       break
     }
     case 'stage': {
@@ -770,6 +976,11 @@ document.addEventListener('submit', async event => {
 
 document.addEventListener('input', event => {
   const input = event.target
+  if (!event.isComposing && ['course', 'course-lesson'].includes(input.form?.dataset.form)) queueCourseDraft(input.form)
+  if (input.matches('[data-form="course-sharing"] select[name="mode"]')) {
+    dialog.querySelector('[data-collaborator-picker]').hidden = input.value !== 'shared'
+    dialog.querySelector('[data-public-sharing-note]').hidden = input.value !== 'public'
+  }
   if (input.matches('[data-wish-course-filter]')) {
     const query = input.value.trim().toLowerCase()
     const choices = [...dialog.querySelectorAll('[data-action="wish-attach"]')]
@@ -795,9 +1006,21 @@ document.addEventListener('input', event => {
 dialog.addEventListener('click', event => {
   if (event.target === dialog) dialog.close()
 })
+dialog.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && event.target.matches('[data-collaborator-search]')) {
+    event.preventDefault()
+    dialog.querySelector('[data-action="find-collaborators"]').click()
+  }
+})
+window.addEventListener('beforeunload', event => {
+  if (!state.editor?.autosave?.dirty()) return
+  event.preventDefault()
+  event.returnValue = ''
+})
 window.addEventListener('popstate', () => navigate())
 accountEvents?.addEventListener('message', () => {
   identityRevision++
+  state.editor?.autosave?.discard()
   views.invalidate()
   navigate()
 })

@@ -14,6 +14,7 @@ import { getLoginSettings } from './login-config.js'
 import { beginOidc, finishOidc } from './oidc.js'
 import { profileFor, readView } from './views.js'
 import { wishApi } from './wishes.js'
+import { collaborationApi } from './collaboration.js'
 
 const scriptPath = `/assets/app.${CLIENT_DIGEST}.js`
 const stylePath = `/assets/style.${CSS_DIGEST}.css`
@@ -52,6 +53,7 @@ async function api(request, env, url) {
   if (resource === 'admin') return adminApi(request, env, user, settings, url)
   if (resource === 'wishes') return wishApi(request, db, user, url)
   if (resource === 'courses') {
+    if (id && ['sharing', 'versions', 'stages'].includes(action)) return collaborationApi(request, db, user, url, id, action, extra)
     if (method === 'GET') {
       return json(id ? await courseDetail(db, user, id) : await listCourses(db, user, url.searchParams.get('scope') ?? 'public'))
     }
@@ -63,7 +65,7 @@ async function api(request, env, url) {
   }
   if (resource === 'stages') {
     if (method === 'GET' && !action) {
-      return json(id ? await stageDetail(db, user, id) : await listStages(db, user, url.searchParams.get('scope') ?? 'available'))
+      return json(id ? await stageDetail(db, user, id, url.searchParams.get('courseId')) : await listStages(db, user, url.searchParams.get('scope') ?? 'available'))
     }
     if ((method === 'POST' && !id) || (method === 'PUT' && id && !action)) {
       requireUser(user)

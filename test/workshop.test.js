@@ -216,6 +216,8 @@ test('MCP creates courses with a revocable user token', async () => {
   assert.equal(course.stages[0].id, 'api-setup')
   assert.equal(course.visibility, 'private')
   assert.equal((await data('/api/courses?scope=owned', { cookie }))[0].id, course.id)
+  const versions = await rpc('tools/call', { name: 'course_versions', arguments: { courseId: course.id } })
+  assert.equal(JSON.parse(versions.result.content[0].text).items[0].title, course.title)
   await data('/api/token', { method: 'DELETE', cookie })
   await rpc('tools/call', { name: 'course_list' }, token, 401)
 })
@@ -291,6 +293,107 @@ test('course wishes support discussion, public course links and author-only reso
     jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'wish_get', arguments: { wishId: wish.id } },
   } })
   assert.equal(JSON.parse(rpc.result.content[0].text).title, body.title)
+})
+
+test('invited editors can collaborate on private courses and restore a complete checkpoint', async () => {
+  const [author, editor, reader] = await Promise.all(['courseauthor', 'courseeditor', 'coursereader'].map(register))
+  const privateStage = await data('/api/stages', { method: 'POST', cookie: author, json: {
+    title: '私有练习', task: '练习任务', tutorial: '初始讲义', methods: ['answer'], visibility: 'private',
+  } }, 201)
+  const initial = await data('/api/courses', { method: 'POST', cookie: author, json: {
+    title: '协作课程', stageIds: [privateStage.id, 'api-setup'],
+  } }, 201)
+  const path = '/api/courses/' + initial.id
+  const stagePath = '/api/stages/' + privateStage.id
+  const scoped = stagePath + '?courseId=' + initial.id
+  const view = (suffix, cookie) => data('/api/view?path=' + encodeURIComponent('/course/' + initial.id + suffix), { cookie })
+  const update = (cookie, json, status) => data(path, { method: 'PUT', cookie, json }, status)
+  const sharing = (cookie, json, status) => data(path + '/sharing', { method: 'PUT', cookie, json }, status)
+  const history = cookie => data(path + '/versions', { cookie })
+  await data(path, { cookie: editor }, 404)
+  await sharing(author, { mode: 'public', editorIds: [], expectedRevision: 0 }, 409)
+  const [match] = await data(path + '/sharing/users?q=courseeditor', { cookie: author })
+  assert.deepEqual(Object.keys(match).sort(), ['id', 'name', 'username'])
+  const shared = await sharing(author, { mode: 'shared', editorIds: [match.id], expectedRevision: 0 })
+  assert.equal(shared.visibility, 'private')
+  assert.equal((await data('/api/view?path=%2Fowned', { cookie: editor })).view.courses[0].id, initial.id)
+  assert.equal((await view('/edit', editor)).view.course.canEdit, true)
+  assert.equal((await view('/stage/' + privateStage.id, editor)).view.stage.tutorial, '初始讲义')
+  assert.equal((await view('/edit', reader)).view.status, 404)
+  await data(stagePath, { cookie: editor }, 404)
+  await data(scoped, { cookie: reader }, 404)
+  await data(path + '/sharing', { cookie: editor }, 403)
+  await update(editor, { title: initial.title, visibility: 'public', expectedRevision: shared.revision }, 403)
+  await update(editor, { title: '错账号的草稿', expectedEditorId: 'other', expectedRevision: shared.revision }, 409)
+
+  const beforeRace = { stageIds: [privateStage.id, 'api-setup'], expectedRevision: shared.revision }
+  const writes = await Promise.all([
+    request(path, { method: 'PUT', cookie: author, json: { ...beforeRace, title: '作者保存' } }),
+    request(path, { method: 'PUT', cookie: editor, json: { ...beforeRace, title: '协作者保存' } }),
+  ])
+  assert.deepEqual(writes.map(result => result.status).sort(), [200, 409])
+  const winner = await writes.find(result => result.ok).json()
+  assert.equal((await history(editor)).items.length, 1)
+  const lesson = await data(path + '/stages/' + privateStage.id, { method: 'PUT', cookie: editor, json: {
+    title: '本课程专用关卡名', task: '新任务', tutorial: '本课程的新讲义', expectedRevision: winner.revision,
+  } })
+  assert.equal(lesson.course.stages[0].title, '本课程专用关卡名')
+  assert.equal((await data(stagePath, { cookie: author })).tutorial, '初始讲义')
+  await data(stagePath + '/learned', { method: 'PUT', cookie: editor, json: { learned: true, courseId: initial.id } })
+  const saved = await update(editor, {
+    title: '手动存档', stageIds: ['api-setup', privateStage.id], checkpoint: true, expectedRevision: lesson.course.revision,
+  })
+  const { course: expanded, stage: newStage } = await data(path + '/stages', { method: 'POST', cookie: editor, json: {
+    title: '后来增加的私有关卡', task: '完成新增任务', expectedRevision: saved.revision,
+  } }, 201)
+  assert.equal(newStage.owned, false)
+  assert.equal(expanded.stages.at(-1).id, newStage.id)
+  const versions = await history(editor)
+  const baseline = versions.items.find(version => version.revision === 0)
+  assert(versions.items.some(version => version.title === '手动存档' && version.reason === 'manual'))
+  const restore = path + '/versions/' + baseline.id
+  assert.deepEqual((await data(restore, { cookie: editor })).stages.map(stage => stage.id), [privateStage.id, 'api-setup'])
+  const restored = await data(restore, { method: 'POST', cookie: editor, json: { expectedRevision: expanded.revision } })
+  assert.equal(restored.title, initial.title)
+  assert.deepEqual(restored.stages.map(stage => stage.id), [privateStage.id, 'api-setup'])
+  const restoredLesson = await data(scoped, { cookie: editor })
+  assert.equal(restoredLesson.tutorial, '初始讲义')
+  assert.equal(restoredLesson.learned, true)
+  const latest = (await history(editor)).items
+  assert.equal(latest[0].reason, 'restored')
+  assert.equal(latest[1].reason, 'before_restore')
+  assert.equal(restored.edit_mode, 'shared')
+  await sharing(author, { mode: 'owner', editorIds: [], expectedRevision: restored.revision })
+  await data(path, { cookie: editor }, 404)
+  await data(scoped, { cookie: editor }, 404)
+  await data(restore, { cookie: editor }, 404)
+})
+
+test('open collaboration allows signed-in contributors and keeps pre-public history private', async () => {
+  const [author, contributor] = await Promise.all(['openauthor', 'opencontributor'].map(register))
+  const course = await data('/api/courses', { method: 'POST', cookie: author, json: { title: '私有初稿' } }, 201)
+  const path = '/api/courses/' + course.id
+  const initial = (await data(path + '/versions', { cookie: author })).items[0]
+  const draft = await data(path, { method: 'PUT', cookie: author, json: { title: '公开协作课程', expectedRevision: 0 } })
+  const published = await data(path + '/sharing', { method: 'PUT', cookie: author, json: {
+    mode: 'public', editorIds: [], expectedRevision: draft.revision,
+  } })
+  assert.equal(published.visibility, 'public')
+  assert.equal((await data(path, {})).canEdit, false)
+  await data(path, { method: 'PUT', json: { title: '匿名保存' } }, 401)
+  await data(path + '/versions', {}, 401)
+  const write = await data(path, { method: 'PUT', cookie: contributor, json: {
+    title: '贡献者修改', expectedRevision: published.revision,
+  } })
+  assert.equal(write.title, '贡献者修改')
+  const versions = await data(path + '/versions', { cookie: contributor })
+  assert.deepEqual(versions.items.map(item => item.revision), [published.revision])
+  await data(path + '/versions/' + initial.id, { cookie: contributor }, 404)
+  await data(path + '/versions/' + initial.id, { method: 'POST', cookie: contributor, json: { expectedRevision: write.revision } }, 404)
+  await data(path + '/sharing', { method: 'PUT', cookie: author, json: {
+    mode: 'owner', editorIds: [], expectedRevision: write.revision,
+  } })
+  await data(path + '/versions', { cookie: contributor }, 403)
 })
 
 async function oidcFlow({ badSignature = false, badNonce = false } = {}) {
