@@ -28,7 +28,8 @@ const visibility = enumeration(['public', 'private'])
 const expectedRevision = { type: 'number', minimum: 0 }
 const pageNumber = { type: 'number', minimum: 1 }
 const course = {
-  title: string, description: string, category: enumeration(CATEGORIES), theme: enumeration(THEMES),
+  title: string, alias: { ...string, description: '可选且唯一的课程短链接别名。留空清除，省略则保留。' },
+  description: string, category: enumeration(CATEGORIES), theme: enumeration(THEMES),
   visibility, stageIds: array(string),
   prerequisites: array({
     type: 'object', properties: { courseId: string, mode: enumeration(prerequisiteModes) },

@@ -14,8 +14,8 @@ export const methods = {
   screenshot: [LABELS.screenshot, 'image'],
   file: [LABELS.file, 'file'],
 }
-export const coursePath = id => '/course/' + key(id)
-export const stagePath = (id, course) => course ? coursePath(course.id) + '/stage/' + key(id) : '/stage/' + key(id)
+export const coursePath = course => '/course/' + key(typeof course === 'string' ? course : course.alias || course.id)
+export const stagePath = (id, course) => course ? coursePath(course) + '/stage/' + key(id) : '/stage/' + key(id)
 export const link = (url, label, style = 'btn', symbol) =>
   `<a class="${style}" href="${esc(url)}" data-link>${symbol ? icon(symbol, 17) : ''}${label}</a>`
 export const button = (action, label, style = 'btn', symbol, attrs = '') =>
@@ -49,7 +49,7 @@ export function progress(course) {
 }
 
 export function card(course, scope) {
-  return `<a class="course-card" href="${coursePath(course.id)}" data-link>
+  return `<a class="course-card" href="${coursePath(course)}" data-link>
     <div class="card-cover theme-${theme(course)}"><span class="cover-icon">${icon(topicIcon(course), 28)}</span><span class="cover-orbit"></span></div>
     <div class="card-content">
       <div class="card-tag">${esc(course.category)}${labelBadges(course.labels)}${scope === 'owned' ? visibility(course.visibility) : ''}${scope === 'owned' && !course.owned ? '<span class="visibility">协作课程</span>' : ''}${course.moderated_at ? '<span class="visibility">已下架</span>' : ''}</div>
@@ -65,7 +65,7 @@ export function hero(course) {
     <div class="hero-copy">
       <div class="hero-label">${icon('spark', 16)} 推荐课程</div>
       <h2>${esc(course.title)}</h2><p>${esc(course.description)}</p>
-      <a class="btn primary" href="${coursePath(course.id)}" data-link>开始学习 ${icon('arrow', 17)}</a>
+      <a class="btn primary" href="${coursePath(course)}" data-link>开始学习 ${icon('arrow', 17)}</a>
       <span class="hero-meta">${icon('layers', 16)} ${course.stageCount} 个实战关卡</span>
     </div>
     <div class="hero-visual" aria-hidden="true">
@@ -91,7 +91,7 @@ export function coursePage(course, user) {
       <div class="intro-actions">
         ${next ? link(stagePath(next.id, course), course.completedCount ? '继续学习' : '开始学习', 'btn primary', 'play') : ''}
         ${!course.learningLocked && !course.joined && !course.owned ? button('join', '加入我的学习', 'btn', 'plus') : ''}
-        ${course.canEdit ? link(coursePath(course.id) + '/edit', '编辑课程', 'btn', 'pen') : ''}
+        ${course.canEdit ? link(coursePath(course) + '/edit', '编辑课程', 'btn', 'pen') : ''}
       </div>
     </section>
     ${prerequisitePanel(course)}
@@ -112,7 +112,7 @@ function prerequisitePanel(course) {
     <ul class="prerequisite-list">${course.prerequisites.map(item => `<li>
       <div class="step-text"><strong>${esc(item.title ?? '前置课程暂不可访问')}</strong>
         <small>${item.mode === 'required' ? '必修' : '建议 · 可跳过'} · ${item.completed ? '已完成' : '未完成'}</small></div>
-      ${item.title ? link(coursePath(item.courseId), item.completed ? '查看课程' : '去学习', 'btn', 'arrow') : ''}
+      ${item.title ? link(coursePath(item.alias || item.courseId), item.completed ? '查看课程' : '去学习', 'btn', 'arrow') : ''}
     </li>`).join('')}</ul>
   </section>`
 }
@@ -145,6 +145,7 @@ export function submission(stage, kind, prompt = '') {
     const label = stage.learned ? '已学会 · 撤销' : blocked ? '请先完成必填项' : '标记学会了'
     const attrs = blocked ? `disabled title="必填提交：${esc(kindLabels(missing))} 尚未完成"` : ''
     return button('learned', label, stage.learned ? 'btn done' : 'btn', 'check', attrs)
+      + `<small class="participation-count learned-count">已有 ${stage.stats?.learned ?? 0} 人学会</small>`
       + (blocked ? `<p class="submit-hint">必填：${esc(kindLabels(missing))}</p>` : '')
   }
   const current = stage.submissions.find(entry => entry.kind === kind)
@@ -153,7 +154,9 @@ export function submission(stage, kind, prompt = '') {
   const required = stage.required?.includes(kind)
   const [label, symbol] = methods[kind]
   const uploaded = `/api/stages/${key(stage.id)}/upload/${kind}`
-  const title = `<div class="submit-title">${icon(symbol, 19)}<h3>${label}</h3>${required ? '<span class="saved required">必填</span>' : ''}${current ? '<span class="saved">已提交</span>' : ''}</div>`
+  const preview = uploaded + '?preview=1&v=' + key(current?.updated_at ?? '')
+  const title = `<div class="submit-title">${icon(symbol, 19)}<h3>${label}</h3>${required ? '<span class="saved required">必填</span>' : ''}${current ? '<span class="saved">已提交</span>' : ''}
+      <small class="participation-count">已有 ${stage.stats?.[kind] ?? 0} 人提交</small></div>`
     + (prompt ? `<p class="submit-prompt">${esc(prompt)}</p>` : '')
     + (required && !current ? '<p class="submit-hint">这是必填提交，完成后才能标记学会了。</p>' : '')
   if (kind === 'answer') {
@@ -163,12 +166,15 @@ export function submission(stage, kind, prompt = '') {
     </form>`
   }
   return `<form class="submission" data-form="upload" data-kind="${kind}">${title}
-    ${current ? `<div class="existing-file">${kind === 'screenshot' ? `<a href="${uploaded}"><img src="${uploaded}?preview=1&amp;v=${key(current.updated_at)}" alt="已提交截图"></a>` : icon('file', 18)}
-      <a href="${uploaded}">${esc(current.filename)}</a></div>` : ''}
+    ${current ? `<div class="existing-file">${kind === 'screenshot'
+      ? `<a href="${esc(preview)}" data-image-preview data-preview-alt="${esc(current.filename)}" aria-label="放大预览已提交截图"><img src="${esc(preview)}" alt="已提交截图"></a>
+        <a href="${esc(preview)}" data-image-preview data-preview-alt="${esc(current.filename)}">${esc(current.filename)}</a>`
+      : `${icon('file', 18)}<a href="${uploaded}">${esc(current.filename)}</a>`}</div>` : ''}
     ${allowed ? `<div class="upload-row"><label class="file-picker">${icon('upload', 18)}<span>选择${kind === 'screenshot' ? '截图' : '文件'}</span>
       <input type="file" name="upload" ${kind === 'screenshot' ? 'accept="image/png,image/jpeg,image/webp,image/gif"' : ''} required></label>
       ${kind === 'screenshot' ? button('capture-screen', '截取屏幕', 'btn capture-screen', 'image') : ''}
       <span class="file-label subtle">最多 10 MB</span><button class="btn upload-submit">${current ? '替换上传' : '提交上传'}</button></div>` : ''}
+    ${allowed && kind === 'screenshot' ? '<p class="paste-hint" data-screenshot-paste tabindex="0">也可以直接按 Ctrl+V 粘贴图片，预览后上传。</p>' : ''}
   </form>`
 }
 
@@ -185,14 +191,16 @@ function askSlot(stage, field, signedIn = true) {
   const matched = choice && field.options.includes(answer)
   const others = choice && answer && !matched
   const selected = matched ? answer : others ? '其他' : ''
+  const count = stage.fieldStats?.find(item => item.field === fieldKey)?.count ?? 0
+  const participants = `<small class="participation-count" data-field-count>已有 ${count} 人填写</small>`
   if (!signedIn) {
     return `<div class="ask-field ${answer ? 'filled' : ''}" data-ask-field data-field="${esc(fieldKey)}" data-kind="locked">
-      <div class="ask-title">${icon('text', 15)}<span>${esc(field.name)}</span></div>
+      <div class="ask-title">${icon('text', 15)}<span>${esc(field.name)}</span>${participants}</div>
       <p class="subtle">登录后可以在这里填写。</p>
     </div>`
   }
   return `<div class="ask-field ${answer ? 'filled' : ''}" data-ask-field data-field="${esc(fieldKey)}" data-kind="${choice ? 'choice' : 'text'}">
-    <div class="ask-title">${icon('text', 15)}<span>${esc(field.name)}</span>${required ? '<span class="saved required">必填</span>' : ''}<span class="saved ask-saved">已填</span></div>
+    <div class="ask-title">${icon('text', 15)}<span>${esc(field.name)}</span>${required ? '<span class="saved required">必填</span>' : ''}<span class="saved ask-saved">已填</span>${participants}</div>
     ${choice
       ? `<select data-ask-select aria-label="${esc(field.name)}">
           <option value="">请选择</option>
@@ -294,7 +302,7 @@ export function stagePage(stage, course, entry, signedIn) {
       <section class="locked-panel">${icon('lock', 27)}
         <h2>关卡尚未解锁</h2>
         <p>先学会${waiting.map(title => `「${esc(title)}」`).join('、')}，再回到这里继续。</p>
-        ${link(coursePath(course.id), '返回课程关卡', 'btn primary', 'layers')}
+        ${link(coursePath(course), '返回课程关卡', 'btn primary', 'layers')}
       </section>
     </article>` : `<article class="lesson">
         <header class="lesson-header">
@@ -308,7 +316,7 @@ export function stagePage(stage, course, entry, signedIn) {
         ${tutorialPanel(stage, signedIn)}
         ${finishPanel(stage)}
       </article>`
-  return `<p class="breadcrumb">${course ? link(coursePath(course.id), esc(course.title), 'back', 'left') : link('/stages', '我的关卡', 'back', 'left')}</p>
+  return `<p class="breadcrumb">${course ? link(coursePath(course), esc(course.title), 'back', 'left') : link('/stages', '我的关卡', 'back', 'left')}</p>
     <div class="learning-layout ${course ? '' : 'standalone'}">
       ${lesson}
       ${course ? `<aside class="lesson-outline"><h2>本课关卡</h2><div data-outline>${progress(course)}${outline(course, stage.id)}</div></aside>` : ''}
@@ -360,7 +368,7 @@ export function prerequisiteEditor(editor) {
 
 export function courseEditor(editor) {
   const item = editor.course ?? {}
-  return `<p class="breadcrumb">${link(item.id ? coursePath(item.id) : '/owned', item.id ? '返回课程' : '我的创作', 'back', 'left')}</p>
+  return `<p class="breadcrumb">${link(item.id ? coursePath(item) : '/owned', item.id ? '返回课程' : '我的创作', 'back', 'left')}</p>
     <div class="page-heading"><h1>${item.id ? '编辑课程' : '创建课程'}</h1>
       ${item.id ? `<div class="editor-toolbar">
         <span data-course-save-status role="status">已保存</span>
@@ -372,6 +380,10 @@ export function courseEditor(editor) {
     <form class="editor form-panel" data-form="course">
       <h2>课程信息</h2>
       <label>课程名称<input name="title" maxlength="100" required value="${esc(item.title)}" placeholder="例如，AI 视频创作工作流"></label>
+      ${!item.id || item.owned ? `<label>课程别名 <span class="subtle">选填</span>
+        <input name="alias" maxlength="60" minlength="2" pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*"
+          value="${esc(item.alias)}" placeholder="例如 pan-baidu" autocapitalize="none" spellcheck="false">
+        <small class="subtle">2–60 个英文字母、数字或短横线，不能重复。保存后优先使用 /course/别名。</small></label>` : ''}
       <label>课程介绍<textarea name="description" maxlength="1200" rows="3" placeholder="学完这门课程，可以完成什么？">${esc(item.description)}</textarea></label>
       <div class="form-columns">
         <label>课程分类<select name="category">${options(categories.map(name => [name, name]), item.category ?? 'AI 创作')}</select></label>

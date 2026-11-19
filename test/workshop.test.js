@@ -369,10 +369,21 @@ test('learners can fill small ask fields attached to tutorial steps', async () =
   const detail = await data('/api/stages/' + stageId, { cookie: learner })
   assert.deepEqual(detail.answers.map(item => [item.field, item.value]).sort(),
     [['你准备做哪一类？', '教案'], ['补充一句', '先把开学第一周做完']].sort())
+  assert.deepEqual(detail.fieldStats.map(item => [item.field, item.count]).sort(),
+    [['你准备做哪一类？', 1], ['补充一句', 1]].sort())
+  await data(path, { method: 'PUT', cookie: learner, json: { field: '你准备做哪一类？', value: '修改后的私人回答' } })
+  const otherLearner = await register('askotherlearner')
+  await data(path, { method: 'PUT', cookie: otherLearner, json: { field: '你准备做哪一类？', value: '另一位学员的私人回答' } })
+  await data(path, { method: 'PUT', cookie: otherLearner, json: { field: '不在本课程显示的字段', value: '只供其他讲义使用的回答' } })
   const ownerView = await data('/api/stages/' + stageId, { cookie: owner })
   assert.deepEqual(ownerView.answers, [])
+  assert.equal(ownerView.fieldStats.find(item => item.field === '你准备做哪一类？').count, 2)
+  assert(!ownerView.fieldStats.some(item => item.field === '不在本课程显示的字段'))
+  assert.equal(ownerView.stats.participants, 2)
   await data(path, { method: 'PUT', cookie: learner, json: { field: '补充一句', value: '' } })
-  assert.deepEqual((await data('/api/stages/' + stageId, { cookie: learner })).answers.map(item => item.field), ['你准备做哪一类？'])
+  const cleared = await data('/api/stages/' + stageId, { cookie: learner })
+  assert.deepEqual(cleared.answers.map(item => item.field), ['你准备做哪一类？'])
+  assert(!cleared.fieldStats.some(item => item.field === '补充一句'))
   await data(path, { method: 'PUT', cookie: learner, json: { field: 'a'.repeat(61), value: 'x' } }, 400)
   await data(path, { method: 'PUT', cookie: learner, json: { field: '合法名称', value: 'x'.repeat(2001) } }, 400)
   await data(path, { method: 'PUT', json: { field: '匿名', value: 'x' } }, 401)
@@ -721,6 +732,51 @@ test('inline course settings enforce required answers, isolate reuse, reject sta
   assert.deepEqual(restoredStage.required, [])
   assert.deepEqual(restoredStage.requiredFields, [])
   assert.equal(restoredStage.submissions[0].answer, '完成练习')
+})
+
+test('course aliases are unique, author-managed and resolve course, editor and stage routes', async () => {
+  const [owner, collaborator] = await Promise.all(['aliasowner', 'aliaseditor'].map(register))
+  const course = await data('/api/courses', { method: 'POST', cookie: owner, json: {
+    title: '带别名的课程', alias: 'Pan-Baidu', visibility: 'public', stageIds: ['step'],
+    newStages: [{ clientId: 'step', title: '短链接关卡', task: '完成关卡' }],
+  } }, 201)
+  assert.equal(course.alias, 'pan-baidu')
+  assert.equal((await data('/api/courses/PAN-BAIDU', {})).id, course.id)
+  assert.equal((await data('/api/courses/' + course.id, {})).alias, course.alias)
+  const view = (path, cookie) => data('/api/view?path=' + encodeURIComponent(path), { cookie })
+  assert.equal((await view('/course/pan-baidu')).view.course.id, course.id)
+  assert.equal((await view('/course/pan-baidu/edit', owner)).view.type, 'editor')
+  assert.equal((await view('/course/pan-baidu/stage/' + course.stages[0].id)).view.stage.id, course.stages[0].id)
+  const account = (await data('/api/me', { cookie: collaborator })).user
+  const shared = await data('/api/courses/pan-baidu/sharing', { method: 'PUT', cookie: owner, json: {
+    mode: 'shared', editorIds: [account.id], expectedRevision: course.revision,
+  } })
+  await data('/api/courses/pan-baidu', { method: 'PUT', cookie: collaborator, json: {
+    title: course.title, alias: 'steal-alias', expectedRevision: shared.revision,
+  } }, 403)
+  const renamed = await data('/api/courses/pan-baidu', { method: 'PUT', cookie: owner, json: {
+    title: course.title, alias: 'baidu-sharing', expectedRevision: shared.revision,
+  } })
+  assert.equal(renamed.alias, 'baidu-sharing')
+  await data('/api/courses/pan-baidu', {}, 404)
+  assert.equal((await data('/api/courses/' + course.id, {})).alias, renamed.alias)
+  const baseline = (await data('/api/courses/' + course.id + '/versions', { cookie: owner })).items.find(item => item.revision === 0)
+  await data('/api/courses/baidu-sharing/versions/' + baseline.id, { method: 'POST', cookie: owner, json: {
+    expectedRevision: renamed.revision,
+  } })
+  assert.equal((await data('/api/courses/baidu-sharing', {})).alias, renamed.alias)
+  const writes = await Promise.all(['alias-contest', 'ALIAS-CONTEST'].map(alias => request('/api/courses', {
+    method: 'POST', cookie: owner, json: { title: '竞争别名', alias },
+  })))
+  assert.deepEqual(writes.map(response => response.status).sort(), [201, 409])
+  for (const alias of ['new', 'ai-image', 'contains space', 'slash/name', '-leading', course.id]) {
+    const response = await request('/api/courses', { method: 'POST', cookie: owner, json: { title: '无效别名', alias } })
+    assert([400, 409].includes(response.status), alias + ' unexpectedly accepted')
+  }
+  const privateCourse = await data('/api/courses', { method: 'POST', cookie: owner, json: { title: '私有短链接', alias: 'private-alias' } }, 201)
+  assert.equal((await view('/course/private-alias', collaborator)).view.status, 404)
+  await data('/api/courses/private-alias', { cookie: collaborator }, 404)
+  assert.equal((await data('/api/courses/private-alias', { cookie: owner })).id, privateCourse.id)
 })
 
 async function oidcFlow({ badSignature = false, badNonce = false } = {}) {

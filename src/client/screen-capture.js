@@ -36,7 +36,7 @@ async function captureFrame() {
 const captureButton = (action, text, style = 'btn') =>
   `<button type="button" class="${style}" data-capture-action="${action}">${text}</button>`
 
-export async function captureScreenshot({ dialog, showDialog, isCurrent, upload }) {
+export async function captureScreenshot(options) {
   let frame
   try {
     frame = await captureFrame()
@@ -45,8 +45,26 @@ export async function captureScreenshot({ dialog, showDialog, isCurrent, upload 
     if (error.name === 'NotReadableError') throw new Error('当前窗口无法被截取，请重新选择窗口或屏幕。')
     throw error
   }
+  showScreenshot(frame, options)
+}
+
+export async function pasteScreenshot(file, options) {
+  if (!file.size || file.size > 10 * 1024 * 1024) throw new Error('图片须大于 0 且不超过 10 MB。')
+  const bitmap = await createImageBitmap(file).catch(() => { throw new Error('无法读取这张图片，请选择 PNG、JPEG 或 WebP 格式的图片。') })
+  const frame = document.createElement('canvas')
+  try {
+    frame.width = bitmap.width
+    frame.height = bitmap.height
+    frame.getContext('2d').drawImage(bitmap, 0, 0)
+  } finally {
+    bitmap.close()
+  }
+  showScreenshot(frame, options, true)
+}
+
+function showScreenshot(frame, { dialog, showDialog, isCurrent, upload }, initiallyPreview = false) {
   if (!isCurrent()) return
-  showDialog('框选截图', `<div class="screen-capture">
+  showDialog(initiallyPreview ? '图片预览' : '框选截图', `<div class="screen-capture">
     <p data-capture-hint>在画面上拖动，框选要提交的区域，也可以使用整张截图。</p>
     <div class="capture-stage"><div class="capture-surface">
       <canvas data-capture-canvas aria-label="截图画面，拖动可框选区域"></canvas>
@@ -204,4 +222,5 @@ export async function captureScreenshot({ dialog, showDialog, isCurrent, upload 
   window.addEventListener('resize', fit, { signal })
   dialog.addEventListener('close', () => { events.abort() }, { once: true, signal })
   drawFrame()
+  if (initiallyPreview) preview()
 }

@@ -43,6 +43,7 @@ export function prerequisiteQuery(db, user, courseId) {
       )
     )
     SELECT r.prerequisite_id AS courseId, r.mode,
+      CASE WHEN ${readableCourse('?1')} THEN c.alias END AS alias,
       CASE WHEN ${readableCourse('?1')} THEN c.title END AS title,
       CASE WHEN ${readableCourse('?1')} THEN c.visibility END AS visibility,
       p.root IS NULL AS completed
@@ -58,7 +59,7 @@ export function lockedByPrerequisites(items) {
 
 export async function prerequisiteChoices(db, user, courseId) {
   return rows(statement(db, `
-    SELECT c.id, c.title, c.visibility FROM courses c
+    SELECT c.id, c.alias, c.title, c.visibility FROM courses c
     WHERE c.id <> ?2 AND (${publicCourse} OR c.owner_id = ?1)
     ORDER BY c.owner_id <> ?1, c.title, c.id
   `, user.id, courseId ?? ''))

@@ -235,6 +235,13 @@ code { background: #f2edf8; border-radius: 4px; padding: 1px 4px; overflow-wrap:
 .locked-panel p { font-size: 14px; }
 .ask-field { display: grid; gap: 7px; margin: 14px 0; padding: 12px 13px; border: 1px solid #e5dcf6; border-radius: 10px; background: #fbf8ff; }
 .ask-title { display: flex; align-items: center; gap: 6px; color: #53416d; font-size: 13px; font-weight: 680; }
+.ask-title { flex-wrap: wrap; }
+.participation-count { color: var(--muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
+.ask-title .participation-count, .submit-title .participation-count { margin-left: auto; }
+.learned-count { display: inline-block; margin-left: 9px; vertical-align: middle; }
+.paste-hint { margin-top: 10px; color: var(--muted); font-size: 12px; width: fit-content; }
+.paste-hint:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 3px; }
+.zoom-close { position: absolute; top: 18px; right: 18px; background: white; z-index: 1; }
 .ask-title svg { color: #7d5cb8; }
 .ask-title .ask-saved { opacity: 0; transition: opacity .2s; }
 .ask-field.filled .ask-saved { opacity: 1; }

@@ -3,7 +3,7 @@ import { adminPage, providerNames } from './admin.js'
 import { createViewCache } from './view-cache.js'
 import { createCourseAutosave } from './course-autosave.js'
 import { lessonBlocks, lessonPayload, quickBlock, quickLesson, updateBlock } from './quick-lesson.js'
-import { captureScreenshot } from './screen-capture.js'
+import { captureScreenshot, pasteScreenshot } from './screen-capture.js'
 import { courseHistory, courseSharingForm, courseVersionPreview, editorChoices } from './collaboration.js'
 import { wishBoard, wishCoursePicker, wishCourses, wishDiscussion, wishForm, wishHeading, wishPage, wishPath } from './wishes.js'
 import { askMarker, hasSubmissionMarker, submissionKinds, submissionMarker, submissionSpecs } from './tutorial.js'
@@ -304,8 +304,8 @@ function paintView({ profile, view }, path) {
       break
     case 'stage':
       state.current = { course: view.course, stage: view.stage, userId: state.user?.id }
-      if (view.course && !views.read(coursePath(view.course.id))) {
-        cachePage(coursePath(view.course.id), { type: 'course', course: view.course })
+      if (view.course && !views.read(coursePath(view.course))) {
+        cachePage(coursePath(view.course), { type: 'course', course: view.course })
       }
       main.innerHTML = stagePage(view.stage, view.course, view.course?.stages.find(item => item.id === view.stage.id), Boolean(state.user))
       break
@@ -379,7 +379,13 @@ async function navigate(path = location.pathname, push = false, focus = false) {
     let data = cached?.data
     while (!data && version === navigation) data = await views.load(path)
     if (version !== navigation) return
+    const course = data.view.course
+    if (course && ['course', 'stage', 'editor'].includes(data.view.type)) {
+      path = data.view.type === 'stage' ? stagePath(data.view.stage.id, course)
+        : coursePath(course) + (data.view.type === 'editor' ? '/edit' : '')
+    }
     if (push && path !== location.pathname) history.pushState({}, '', path)
+    else if (path !== location.pathname) history.replaceState({}, '', path)
     paintView(data, path)
     window.scrollTo(0, 0)
     if (focus) main.focus({ preventScroll: true })
@@ -396,8 +402,8 @@ async function navigate(path = location.pathname, push = false, focus = false) {
 }
 
 
-// 教程里的提问项：输入后短暂延迟自动保存，失焦时立即保存。
-const askTimers = new WeakMap()
+// 同一提问的写入依次完成，避免输入期间旧响应覆盖新答案。
+const askSaves = new WeakMap()
 
 function askValue(box) {
   if (box.dataset.kind === 'choice') {
@@ -411,31 +417,43 @@ function askValue(box) {
 }
 
 function scheduleAskSave(box) {
-  const stage = state.current?.stage
-  if (!stage) return
+  const context = state.current
+  if (!context?.stage) return
   const value = askValue(box)
   box.classList.toggle('filled', Boolean(value))
-  clearTimeout(askTimers.get(box))
-  askTimers.set(box, setTimeout(async () => {
-    if (!requireLogin()) return
-    try {
-      const context = state.current
-      if (state.quick || context?.stage !== stage) return
-      const saved = await api('stages/' + key(stage.id) + '/field', {
-        method: 'PUT', body: { field: box.dataset.field, value, courseId: context.course?.id },
+  let record = askSaves.get(box)
+  if (!record) {
+    record = { context, field: box.dataset.field, version: 0, savedVersion: 0, running: false }
+    askSaves.set(box, record)
+  }
+  record.value = value
+  record.version++
+  clearTimeout(record.timer)
+  record.timer = setTimeout(() => saveAskField(record), 700)
+}
+
+async function saveAskField(record) {
+  if (record.running) return
+  const { context } = record
+  if (state.quick || context !== state.current || context.userId !== state.user?.id) return
+  record.running = true
+  try {
+    while (record.savedVersion !== record.version && context === state.current && !state.quick) {
+      const version = record.version
+      const stageId = context.stage.id
+      await api('stages/' + key(stageId) + '/field', {
+        method: 'PUT', body: { field: record.field, value: record.value, courseId: context.course?.id },
       })
-      const answers = stage.answers ?? (stage.answers = [])
-      const index = answers.findIndex(item => item.field === saved.field)
-      if (saved.value) {
-        if (index >= 0) answers[index] = { ...answers[index], value: saved.value }
-        else answers.push(saved)
-      } else if (index >= 0) answers.splice(index, 1)
-      const updated = await api('stages/' + key(stage.id) + (context.course ? '?courseId=' + key(context.course.id) : ''))
-      applyStage(updated, 'field', context)
-    } catch (error) {
-      announce(error.message, true)
+      record.savedVersion = version
+      const request = context.fieldRefresh = (context.fieldRefresh ?? 0) + 1
+      const updated = await api('stages/' + key(stageId) + (context.course ? '?courseId=' + key(context.course.id) : ''))
+      if (request === context.fieldRefresh) applyStage(updated, 'field', context)
     }
-  }, 700))
+  } catch (error) {
+    if (context === state.current) announce(error.message, true)
+  } finally {
+    record.running = false
+  }
 }
 
 function paintPicked() {
@@ -490,7 +508,8 @@ function courseDraft(editor, form) {
     stageIds: [...editor.ids],
     requires: Object.fromEntries([...editor.ids].map(id => [id, editor.requires?.[id] ?? []])),
     ...(!editor.course || editor.course.owned
-      ? { prerequisites: editor.prerequisites.map(({ courseId, mode }) => ({ courseId, mode })) } : {}),
+      ? { alias: (data.alias ?? '').trim().toLowerCase(),
+        prerequisites: editor.prerequisites.map(({ courseId, mode }) => ({ courseId, mode })) } : {}),
   }
 }
 
@@ -511,8 +530,16 @@ function syncCourseEditor(editor, course, stage) {
   editor.available = editor.available.map(item => ({ ...item, ...updated.get(item.id) }))
   editor.requires = Object.fromEntries(course.stages.map(item => [item.id, item.requires ?? []]))
   views.invalidate((path, view) => view.course?.id === course.id || ['explore', 'shelf'].includes(view.type))
-  cachePage(coursePath(course.id), { type: 'course', course })
-  if (editor === state.editor) paintPicked()
+  cachePage(coursePath(course), { type: 'course', course })
+  if (editor === state.editor) {
+    paintPicked()
+    const path = coursePath(course) + '/edit'
+    if (path !== state.path) {
+      history.replaceState({}, '', path)
+      state.path = path
+    }
+    main.querySelector('.breadcrumb a').href = coursePath(course)
+  }
 }
 
 function mountCourseEditor(course, available, prerequisiteChoices = []) {
@@ -588,7 +615,7 @@ async function startQuickLesson() {
       context.course = saved.course
       context.stage = { ...context.stage, ...saved.stage }
       views.invalidate((path, view) => view.course?.id === saved.course.id || ['explore', 'shelf'].includes(view.type))
-      cachePage(coursePath(saved.course.id), { type: 'course', course: saved.course })
+      cachePage(coursePath(saved.course), { type: 'course', course: saved.course })
       main.querySelector('[data-outline]').innerHTML = progress(saved.course) + outline(saved.course, editor.stageId)
     },
   })
@@ -668,13 +695,18 @@ function applyStage(stage, kind, context) {
   views.update(view => {
     if (view.stage?.id === stage.id) view.stage = { ...view.stage,
       learned: stage.learned, submissions: stage.submissions, stats: stage.stats,
-      missing: stage.missing, missingFields: stage.missingFields, answers: stage.answers }
+      missing: stage.missing, missingFields: stage.missingFields, answers: stage.answers, fieldStats: stage.fieldStats }
     syncCourseProgress(view.course, stage, joinedCourseId)
     syncStageRules(view.course, stage)
   })
   if (context !== state.current) return
   context.stage = stage
+  if (state.quick) return
   main.querySelector('[data-stage-stats]').innerHTML = stageStats(stage)
+  for (const box of main.querySelectorAll('[data-ask-field]')) {
+    const count = stage.fieldStats?.find(item => item.field === box.dataset.field)?.count ?? 0
+    box.querySelector('[data-field-count]').textContent = '已有 ' + count + ' 人填写'
+  }
   for (const slot of main.querySelectorAll(`[data-submission="${kind}"]`)) {
     const focused = slot.contains(document.activeElement)
     const prompt = slot.querySelector('.submit-prompt')?.textContent ?? ''
@@ -705,6 +737,17 @@ async function uploadStageFile(context, kind, file) {
   if (context.course) query.set('courseId', context.course.id)
   const saved = await api('stages/' + key(context.stage.id) + '/upload/' + kind + '?' + query, { method: 'PUT', file })
   applyStage(saved, kind, context)
+}
+
+function screenshotOptions(context) {
+  return {
+    dialog, showDialog,
+    isCurrent: () => context === state.current && context.userId === state.user?.id,
+    async upload(file) {
+      await uploadStageFile(context, 'screenshot', file)
+      announce('截图已上传。')
+    },
+  }
 }
 
 async function filterWishes(status, page) {
@@ -1034,7 +1077,7 @@ async function handleAction(control) {
         views.update(view => {
           if (view.course?.id === saved.id) view.course = saved
         })
-        const path = coursePath(saved.id)
+        const path = coursePath(saved)
         cachePage(path, { type: 'course', course: saved })
         if (context === state.current) await navigate(path)
         announce('已加入我的学习。')
@@ -1062,14 +1105,7 @@ async function handleAction(control) {
     case 'capture-screen': {
       if (!requireLogin()) break
       const context = state.current
-      await captureScreenshot({
-        dialog, showDialog,
-        isCurrent: () => context === state.current && context.userId === state.user?.id,
-        async upload(file) {
-          await uploadStageFile(context, 'screenshot', file)
-          announce('截图已上传。')
-        },
-      })
+      await captureScreenshot(screenshotOptions(context))
       break
     }
     case 'new-stage': {
@@ -1291,7 +1327,7 @@ async function handleForm(form) {
       }
       const newStages = [...editor.newStages.values()].map(({ id, ...stage }) => ({ ...stage, clientId: id }))
       const saved = await api('courses', { method: 'POST', body: { ...courseDraft(editor, form), newStages } })
-      const path = coursePath(saved.id)
+      const path = coursePath(saved)
       views.invalidate()
       cachePage(path, { type: 'course', course: saved })
       await navigate(path, true)
@@ -1421,34 +1457,75 @@ for (const type of ['focusin', 'pointerdown']) {
 
 // 教程里的截图：默认限宽显示，点一下看原图。
 let zoomLayer
+let zoomReturnFocus
 function closeZoom() {
   if (!zoomLayer) return
   zoomLayer.remove()
   zoomLayer = null
   document.body.style.overflow = ''
+  if (zoomReturnFocus?.isConnected) zoomReturnFocus.focus({ preventScroll: true })
+  zoomReturnFocus = null
 }
 function openZoom(image) {
   closeZoom()
+  zoomReturnFocus = document.activeElement
   zoomLayer = document.createElement('div')
   zoomLayer.className = 'img-zoom'
   zoomLayer.setAttribute('role', 'dialog')
   zoomLayer.setAttribute('aria-label', image.alt || '查看图片')
+  zoomLayer.setAttribute('aria-modal', 'true')
+  zoomLayer.tabIndex = -1
   const full = document.createElement('img')
   full.src = image.currentSrc || image.src
   full.alt = image.alt || ''
   zoomLayer.append(full)
+  const close = document.createElement('button')
+  close.type = 'button'
+  close.className = 'icon-btn zoom-close'
+  close.setAttribute('aria-label', '关闭图片预览')
+  close.innerHTML = icon('close', 20)
+  zoomLayer.append(close)
   zoomLayer.addEventListener('click', closeZoom)
   document.body.append(zoomLayer)
   document.body.style.overflow = 'hidden'
+  close.focus()
 }
 document.addEventListener('click', event => {
   if (event.target.closest('.img-zoom')) return
   if (event.target.closest('.quick-lesson')) return
+  const preview = event.target.closest('[data-image-preview]')
+  if (preview) {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+    event.preventDefault()
+    openZoom({ src: preview.href, alt: preview.dataset.previewAlt || '已提交截图' })
+    return
+  }
   const image = event.target.closest('.markdown p > img:only-child')
   if (image && image.naturalWidth) openZoom(image)
 })
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape') closeZoom()
+  if (zoomLayer && event.key === 'Tab') {
+    event.preventDefault()
+    zoomLayer.querySelector('button').focus()
+  }
+})
+
+document.addEventListener('paste', async event => {
+  if (!state.current?.stage || state.quick || dialog.open || zoomLayer
+    || !main.querySelector('[data-form="upload"][data-kind="screenshot"] input[type="file"]')) return
+  const items = [...(event.clipboardData?.items ?? [])]
+  const image = items.find(item => item.kind === 'file' && item.type.startsWith('image/'))?.getAsFile()
+  if (!image) return
+  const typing = event.target.closest?.('input, textarea, [contenteditable="true"]')
+  if (typing && event.clipboardData.getData('text/plain')) return
+  event.preventDefault()
+  if (!requireLogin()) return
+  try {
+    await pasteScreenshot(image, screenshotOptions(state.current))
+  } catch (error) {
+    announce(error.message, true)
+  }
 })
 
 document.addEventListener('click', async event => {

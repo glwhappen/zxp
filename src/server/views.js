@@ -3,6 +3,7 @@ import { adminApi } from './admin.js'
 import { courseDetail, courseOverview, listCourses, listStages, stageDetail, studyStageDetail } from './learning.js'
 import { prerequisiteChoices } from './prerequisites.js'
 import { listWishes, wishDetail } from './wishes.js'
+import { resolveCourseId } from './course-access.js'
 
 export function profileFor(user, settings) {
   return { user, hosted: SITES_HOSTED, login: { methods: settings.methods, oidcLabel: settings.oidcLabel } }
@@ -11,8 +12,10 @@ export function profileFor(user, settings) {
 export async function readView(request, env, user, settings, path) {
   try {
     if (!path?.startsWith('/') || path.startsWith('//') || path.length > 450) fail(404, '页面不存在。')
-    const [section, id, action, stageId, extra] = path.split('/').filter(Boolean).map(decodeURIComponent)
+    const [section, identifier, action, stageId, extra] = path.split('/').filter(Boolean).map(decodeURIComponent)
     const db = env.DB
+    const id = section === 'course' && identifier && identifier !== 'new'
+      ? await resolveCourseId(db, identifier) : identifier
     if (!section) return { type: 'explore', courses: await listCourses(db, user) }
     if ((section === 'owned' || section === 'learning') && !id) {
       const scope = section === 'owned' ? 'owned' : 'joined'

@@ -53,7 +53,7 @@ export async function wishDetail(db, user, id) {
     `, user?.id ?? '', id),
     replyQuery(db, id),
     statement(db, `
-      SELECT c.id, c.title, c.category, l.reaction, u.name AS linkedBy
+      SELECT c.id, c.alias, c.title, c.category, l.reaction, u.name AS linkedBy
       FROM wish_courses l JOIN courses c ON c.id = l.course_id JOIN users u ON u.id = l.linked_by
       WHERE l.wish_id = ? AND ${publicCourse} ORDER BY l.created_at, c.id
     `, id),

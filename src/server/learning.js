@@ -2,10 +2,10 @@ import {
   enabledMethods, KINDS, kindLabels, METHODS, missingRequired, parseList, requiredMethods,
 } from '../shared.js'
 import { choice, fail, field, requireUser, rows, statement } from './core.js'
-import { submissionSpecs } from '../client/tutorial.js'
+import { submissionSpecs, tutorialFields } from '../client/tutorial.js'
 import { listNotes } from './notes.js'
 import { ADMIN_LABELS, COURSE_LABELS, courseLabelKeys } from '../shared.js'
-import { commitCourse, editableCourse, expectEditor, expectRevision, guardCourse, publicCourse, readableCourse, sharedCourse } from './course-access.js'
+import { commitCourse, courseAlias, editableCourse, expectEditor, expectRevision, guardCourse, publicCourse, readableCourse, sharedCourse } from './course-access.js'
 import { checkpoint } from './course-history.js'
 import {
   insertPrerequisites, lockedByPrerequisites, prerequisiteInput, prerequisiteLockMessage, prerequisiteQuery,
@@ -24,7 +24,7 @@ function bools(item) {
 }
 
 const courseSelect = `
-  SELECT c.id, c.title, c.description, c.category, c.theme, c.visibility, u.name AS author,
+  SELECT c.id, c.alias, c.title, c.description, c.category, c.theme, c.visibility, u.name AS author,
     c.owner_id = ?1 AS owned, ${editableCourse('?1')} AS canEdit, c.edit_mode, c.revision, c.updated_at, c.moderated_at,
     c.labels,
     EXISTS(SELECT 1 FROM enrollments e WHERE e.course_id = c.id AND e.user_id = ?1) AS joined,
@@ -168,7 +168,7 @@ export async function readableStage(db, user, stageId, courseId) {
 
 export async function stageDetail(db, user, stageId, courseId) {
   const id = user?.id ?? ''
-  const [stageResult, counts, submissions, answers] = await db.batch([
+  const [stageResult, counts, submissions, answers, fieldCounts] = await db.batch([
     stageQuery(db, user, stageId, courseId),
     statement(db, `
       SELECT
@@ -180,6 +180,7 @@ export async function stageDetail(db, user, stageId, courseId) {
         (SELECT COUNT(*) FROM (
           SELECT user_id FROM progress WHERE stage_id = ?1
           UNION SELECT user_id FROM submissions WHERE stage_id = ?1
+          UNION SELECT user_id FROM stage_answers WHERE stage_id = ?1 AND trim(value) <> ''
         )) AS participants
       FROM submissions WHERE stage_id = ?1
     `, stageId, id),
@@ -189,14 +190,20 @@ export async function stageDetail(db, user, stageId, courseId) {
     statement(db, `
       SELECT field, value, updated_at FROM stage_answers WHERE stage_id = ? AND user_id = ? ORDER BY field
     `, stageId, id),
+    statement(db, `
+      SELECT field, COUNT(DISTINCT user_id) AS count FROM stage_answers
+      WHERE stage_id = ? AND trim(value) <> '' GROUP BY field
+    `, stageId),
   ])
   const stage = stageData(stageResult.results[0])
   const { myLearned, ...stats } = counts.results[0]
   const missing = missingRequired(stage.required, submissions.results.map(entry => entry.kind))
   const missingFields = missingRequired(stage.requiredFields, answers.results.filter(entry => entry.value.trim()).map(entry => entry.field))
   const notes = await listNotes(db, user, stageId)
+  const fields = new Set(tutorialFields(stage.tutorial).map(item => item.key ?? item.name))
+  const fieldStats = fieldCounts.results.filter(item => fields.has(item.field))
   return { ...stage, learned: Boolean(myLearned) && !missing.length && !missingFields.length, stats,
-    submissions: submissions.results, answers: answers.results, missing, missingFields,
+    submissions: submissions.results, answers: answers.results, fieldStats, missing, missingFields,
     notes: notes.notes, noteCanWrite: notes.canWrite }
 }
 
@@ -255,6 +262,8 @@ export async function saveCourse(db, user, data, courseId) {
   const category = choice(data.category ?? '其他', CATEGORIES, '课程分类')
   const theme = choice(data.theme ?? 'violet', THEMES, '课程主题色')
   const visibility = choice(data.visibility ?? current?.visibility ?? 'private', VISIBILITY, '课程可见性')
+  const alias = data.alias === undefined ? current?.alias ?? null : courseAlias(data.alias)
+  if (current && !current.owned && alias !== current.alias) fail(403, '只有作者可以调整课程别名。')
   if (current && !current.owned && visibility !== current.visibility) fail(403, '只有作者可以调整课程可见性。')
   const existingPrerequisites = (current?.prerequisites ?? []).map(({ courseId, mode }) => ({ courseId, mode }))
   const prerequisites = data.prerequisites === undefined ? existingPrerequisites : prerequisiteInput(data.prerequisites)
@@ -310,7 +319,7 @@ export async function saveCourse(db, user, data, courseId) {
   const kept = (current?.labels ?? []).filter(key => adminOnly.has(key))
   const labels = user?.isAdmin ? requested : Object.keys(COURSE_LABELS).filter(key => mine.includes(key) || kept.includes(key))
   const id = courseId ?? crypto.randomUUID()
-  const details = { title, description, category, theme, visibility }
+  const details = { title, description, category, theme, visibility, alias }
   const labelsChanged = JSON.stringify(labels) !== JSON.stringify(current?.labels ?? [])
   if (labelsChanged && current && !current.owned) fail(403, '只有课程作者可以调整课程标签。')
   const reordered = JSON.stringify(ids) !== JSON.stringify(existingIds)
@@ -330,16 +339,16 @@ export async function saveCourse(db, user, data, courseId) {
       if (requirementsChanged) queries.push(statement(db, 'DELETE FROM course_prerequisites WHERE course_id = ?', id))
       queries.push(statement(db, `
         UPDATE courses SET title = ?1, description = ?2, category = ?3, theme = ?4, visibility = ?5,
-          labels = ?7,
+          labels = ?7, alias = ?8,
           edit_mode = CASE WHEN edit_mode = 'public' AND ?5 = 'private' THEN 'owner' ELSE edit_mode END,
           updated_at = CURRENT_TIMESTAMP WHERE id = ?6
-      `, title, description, category, theme, visibility, id, JSON.stringify(labels)))
+      `, title, description, category, theme, visibility, id, JSON.stringify(labels), alias))
     }
   } else {
     queries.push(statement(db, `
-      INSERT INTO courses (title, description, category, theme, visibility, labels, id, owner_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, title, description, category, theme, visibility, JSON.stringify(labels), id, actor))
+      INSERT INTO courses (title, description, category, theme, visibility, labels, id, owner_id, alias)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, title, description, category, theme, visibility, JSON.stringify(labels), id, actor, alias))
   }
   if (requirementsChanged) queries.push(insertPrerequisites(db, id, JSON.stringify(prerequisites)))
   for (const stage of newStages.values()) {
