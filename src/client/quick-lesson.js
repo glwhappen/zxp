@@ -6,7 +6,8 @@ import { icon } from './icons.js'
 export function lessonBlocks(tutorial) {
   const blocks = []
   for (const token of tutorialTokens(tutorial)) {
-    if (token.type === 'space' && blocks.length) {
+    if (blocks.length && (token.type === 'space'
+      || (!token.field && !token.submission && blocks.at(-1).type === 'text'))) {
       blocks.at(-1).raw += token.raw
       continue
     }
@@ -19,6 +20,39 @@ export function lessonBlocks(tutorial) {
     })
   }
   return blocks
+}
+
+export function mergeTextBlocks(blocks) {
+  const result = []
+  for (const block of blocks) {
+    const previous = result.at(-1)
+    if (block.type === 'text' && previous?.type === 'text') {
+      previous.raw = previous.raw.replace(/\s+$/, '') + '\n\n' + block.raw.replace(/^[\r\n]+/, '')
+    } else result.push(block)
+  }
+  return result
+}
+
+export function lessonReferences(editor) {
+  return tutorialTokens(editor.blocks.map(block => block.raw).join(''))
+    .filter(token => token.type === 'def').map(token => token.raw).join('\n')
+}
+
+export function quickFieldPreview(block, editor) {
+  const question = block.type === 'question'
+  const required = question ? editor.requiredFields.includes(block.fieldKey) : editor.required.includes(block.type)
+  const enabled = question || editor.enabled.includes(block.type)
+  return `<div class="quick-field-preview" data-quick-field-preview>
+    <small class="subtle">学习者预览${enabled ? '' : ' · 已停用'}</small>
+    <div class="quick-preview-content">
+      <div class="submit-title">${icon(question ? 'text' : methods[block.type][1], 18)}<strong>${esc(question ? block.name : methods[block.type][0])}</strong>${required ? '<span class="saved required">必填</span>' : ''}</div>
+      ${question ? block.options.length
+        ? `<select aria-label="提问预览" disabled><option>请选择</option>${block.options.map(option => `<option>${esc(option)}</option>`).join('')}<option>其他…</option></select>`
+        : '<input aria-label="提问预览" placeholder="简短写一下" disabled>'
+        : `<p class="submit-prompt">${esc(block.prompt)}</p>${block.type === 'answer'
+          ? '<textarea aria-label="答案框预览" rows="3" placeholder="写下你的练习答案或学习记录…" disabled></textarea>'
+          : `<div class="upload-row"><span class="preview-picker">${icon('upload', 16)}${block.type === 'screenshot' ? '选择截图' : '选择文件'}</span><span class="subtle">最多 10 MB</span><button type="button" class="btn upload-submit" disabled>提交上传</button></div>`}`}
+    </div></div>`
 }
 
 export function lessonPayload(editor) {
@@ -56,14 +90,15 @@ export function quickBlock(block, editor, index) {
         button('quick-add', name, 'btn', null, `data-after="${block.id}" data-type="${type}"`)).join('')}
     </div></div>`
   if (block.type === 'text') {
-    const definitions = editor.blocks.filter(item => /^\s*\[[^\]]+\]:/.test(item.raw)).map(item => item.raw).join('\n')
+    const definitions = lessonReferences(editor)
+    const html = marked.parse(block.raw + '\n' + definitions)
+    if (!html.trim()) return ''
     return `<section class="quick-block quick-text" data-quick-block="${block.id}">
-      ${controls}<button type="button" class="quick-text-preview" data-action="quick-text" ${attributes} aria-label="编辑这段文字">
-        ${markdownBlock(marked.parse(block.raw + '\n' + definitions))}
-      </button>
-      <label class="quick-text-input" hidden><span class="field-label">编辑内容 <span class="subtle">支持 Markdown</span></span>
-        <textarea data-quick-property="text" aria-label="编辑这段文字" rows="4" maxlength="35000">${esc(block.raw.trimEnd())}</textarea>
-      </label>${insert}</section>`
+      <div class="section-head quick-text-head"><h3>${icon('book', 18)} 教程正文</h3>${controls}</div>
+      <div role="button" tabindex="0" class="quick-text-preview" data-action="quick-text" ${attributes} aria-label="编辑这段文字">
+        ${markdownBlock(html)}
+      </div>
+      <div class="quick-text-input" data-rich-mount hidden></div>${insert}</section>`
   }
   const question = block.type === 'question'
   const required = question ? editor.requiredFields.includes(block.fieldKey) : editor.required.includes(block.type)
@@ -81,6 +116,7 @@ export function quickBlock(block, editor, index) {
       <label><input type="checkbox" data-quick-property="required" ${required ? 'checked' : ''} ${enabled ? '' : 'disabled'}> 必填</label>
       <span class="subtle">必填项完成后才可标记学会</span>
     </div>
+    ${quickFieldPreview(block, editor)}
     ${insert}
   </section>`
 }
@@ -101,7 +137,7 @@ export function quickLesson(editor) {
         pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*" placeholder="例如 bind" autocapitalize="none" spellcheck="false">
       <small class="subtle">同一课程内不能重复，2–60 个英文字母、数字或短横线。</small></label>
     <label>学习任务<textarea data-quick-task maxlength="5000" rows="2">${esc(editor.task)}</textarea></label>
-    <p class="subtle">点击段落编辑文字。调整下方提问和提交框后会自动保存到当前课程。</p>
+    <p class="subtle">连续文字一起编辑，支持所见即所得和 Markdown。可在光标处插入提问或提交框，修改会自动保存。</p>
   </header>
   <div class="quick-blocks" data-quick-blocks>${editor.blocks.map((block, index) => quickBlock(block, editor, index)).join('')}</div>
   <div class="quick-add lesson-panel">
