@@ -88,14 +88,15 @@ export function coursePage(course, user) {
       <div class="cover-icon">${icon(topicIcon(course), 30)}</div>
       <div class="intro-main">
         <div class="card-tag">${esc(course.category)}${labelBadges(course.labels)}${visibility(course.visibility)}${course.moderated_at ? '<span class="visibility">已下架</span>' : ''}</div>
-        <h1>${esc(course.title)}</h1><p>${esc(course.description)}</p>
-        <div class="intro-meta"><span>${icon('user', 16)}${esc(course.author)}</span><span>${icon('layers', 16)}${course.stageCount} 个关卡</span><span>${icon('users', 16)}${course.learnerCount} 人学习</span></div>
+        <h1>${esc(course.title)}</h1>
       </div>
       <div class="intro-actions">
         ${next ? link(stagePath(next.id, course), course.completedCount ? '继续学习' : '开始学习', 'btn primary', 'play') : ''}
         ${!course.learningLocked && !course.joined && !course.owned ? button('join', '加入我的学习', 'btn', 'plus') : ''}
         ${course.canEdit ? link(coursePath(course) + '/edit', '编辑课程', 'btn', 'pen') : ''}
       </div>
+      <p class="course-description">${esc(course.description)}</p>
+      <div class="intro-meta"><span>${icon('user', 16)}${esc(course.author)}</span><span>${icon('layers', 16)}${course.stageCount} 个关卡</span><span>${icon('users', 16)}${course.learnerCount} 人学习</span></div>
     </section>
     ${prerequisitePanel(course)}
     <section class="outline-card">
@@ -198,12 +199,12 @@ function askSlot(stage, field, signedIn = true) {
   const participants = `<small class="participation-count" data-field-count>已有 ${count} 人填写</small>`
   if (!signedIn) {
     return `<div class="ask-field ${answer ? 'filled' : ''}" data-ask-field data-field="${esc(fieldKey)}" data-kind="locked">
-      <div class="ask-title">${icon('text', 15)}<span>${esc(field.name)}</span>${participants}</div>
+      <div class="ask-title"><span class="ask-label">${icon('text', 15)} ${esc(field.name)}</span>${participants}</div>
       <p class="subtle">登录后可以在这里填写。</p>
     </div>`
   }
   return `<div class="ask-field ${answer ? 'filled' : ''}" data-ask-field data-field="${esc(fieldKey)}" data-kind="${choice ? 'choice' : 'text'}">
-    <div class="ask-title">${icon('text', 15)}<span>${esc(field.name)}</span>${required ? '<span class="saved required">必填</span>' : ''}<span class="saved ask-saved">已填</span>${participants}</div>
+    <div class="ask-title"><span class="ask-label">${icon('text', 15)} ${esc(field.name)} ${required ? '<span class="saved required">必填</span>' : ''}<span class="saved ask-saved">已填</span></span>${participants}</div>
     ${choice
       ? `<select data-ask-select aria-label="${esc(field.name)}">
           <option value="">请选择</option>
@@ -342,13 +343,13 @@ export function pickedStages(editor) {
       ? `<small class="dep-note">${icon('lock', 13)} 需先学会：${esc(deps.map(dep => titles.get(dep) ?? dep).join('、'))}</small>` : ''
     return `<li><span class="step-number">${index + 1}</span><div class="step-text"><strong>${esc(stage?.title ?? id)}</strong>
       <small>${stage?.visibility === 'public' ? '公开' : '私有'}${stage?.owned ? ' · 我的关卡' : stage?.author ? ` · ${esc(stage.author)}` : ''}${stage?.alias ? ' · /' + esc(stage.alias) : ''}</small>${depNote}</div>
-      ${index > 0 ? button('pick-deps', '', 'icon-btn', 'lock', `${attrs} aria-label="设置前置关卡" title="前置关卡"`) : ''}
+      <div class="stage-row-actions">${index > 0 ? button('pick-deps', '', 'icon-btn', 'lock', `${attrs} aria-label="设置前置关卡" title="前置关卡"`) : ''}
       ${editor.course ? button('edit-course-lesson', '', 'icon-btn', 'pen',
         `${attrs} aria-label="编辑课程讲义" title="编辑课程讲义"`)
         : stage?.owned ? button('edit-stage', '', 'icon-btn', 'pen', `${attrs} aria-label="编辑关卡" title="编辑关卡"`) : ''}
       ${button('move-up', '', 'icon-btn', 'up', `${attrs} aria-label="上移" ${index === 0 ? 'disabled' : ''}`)}
       ${button('move-down', '', 'icon-btn', 'down', `${attrs} aria-label="下移" ${index === editor.ids.length - 1 ? 'disabled' : ''}`)}
-      ${button('remove-stage', '', 'icon-btn', 'close', `${attrs} aria-label="移除关卡" title="移除关卡"`)}</li>`
+      ${button('remove-stage', '', 'icon-btn', 'close', `${attrs} aria-label="移除关卡" title="移除关卡"`)}</div></li>`
   }).join('')}</ol>` : note('在课程中创建关卡，或引用自己创建过的关卡。')
 }
 
@@ -383,7 +384,7 @@ export function courseEditor(editor) {
     <form class="editor form-panel" data-form="course">
       <h2>课程信息</h2>
       <label>课程名称<input name="title" maxlength="100" required value="${esc(item.title)}" placeholder="例如，AI 视频创作工作流"></label>
-      ${!item.id || item.owned ? `<label>课程别名 <span class="subtle">选填</span>
+      ${!item.id || item.owned ? `<label><span class="field-label">课程别名 <span class="subtle">选填</span></span>
         <input name="alias" maxlength="60" minlength="2" pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*"
           value="${esc(item.alias)}" placeholder="例如 pan-baidu" autocapitalize="none" spellcheck="false">
         <small class="subtle">2–60 个英文字母、数字或短横线，不能重复。保存后优先使用 /course/别名。</small></label>` : ''}
@@ -418,12 +419,12 @@ export function stageEditor(stage, mode = 'stage') {
   const lesson = mode === 'course-lesson'
   return `<form data-form="${mode}" data-id="${esc(stage?.id)}">
     <label>关卡名称<input name="title" required maxlength="100" value="${esc(stage?.title)}"></label>
-    ${mode !== 'stage' ? `<label>步骤别名 <span class="subtle">选填</span>
+    ${mode !== 'stage' ? `<label><span class="field-label">步骤别名 <span class="subtle">选填</span></span>
       <input name="alias" maxlength="60" minlength="2" pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*"
         value="${esc(stage?.alias)}" placeholder="例如 bind" autocapitalize="none" spellcheck="false">
       <small class="subtle">同一课程内不能重复，链接会优先使用别名。</small></label>` : ''}
     <label>学习任务<textarea name="task" required maxlength="5000" rows="2" placeholder="描述一个可以完成的任务">${esc(stage?.task)}</textarea></label>
-    <label>教程 <span class="subtle">支持 Markdown</span><textarea name="tutorial" rows="6" maxlength="35000" placeholder="练习步骤、示例和参考链接">${esc(stage?.tutorial)}</textarea></label>
+    <label><span class="field-label">教程 <span class="subtle">支持 Markdown</span></span><textarea name="tutorial" rows="6" maxlength="35000" placeholder="练习步骤、示例和参考链接">${esc(stage?.tutorial)}</textarea></label>
     <div class="placement-tools">
       <p class="subtle" data-placement-status role="status">将光标放在练习题后，插入对应的提交框。</p>
       <input data-submit-prompt maxlength="300" placeholder="这一题要交什么（写清：交什么、几条、什么格式）">

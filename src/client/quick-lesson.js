@@ -59,9 +59,9 @@ export function quickBlock(block, editor, index) {
     const definitions = editor.blocks.filter(item => /^\s*\[[^\]]+\]:/.test(item.raw)).map(item => item.raw).join('\n')
     return `<section class="quick-block quick-text" data-quick-block="${block.id}">
       ${controls}<button type="button" class="quick-text-preview" data-action="quick-text" ${attributes} aria-label="编辑这段文字">
-        ${markdownBlock(marked.parse(block.raw + '\n' + definitions))}<span class="quick-edit-hint">${icon('pen', 14)} 点击编辑</span>
+        ${markdownBlock(marked.parse(block.raw + '\n' + definitions))}
       </button>
-      <label class="quick-text-input" hidden>编辑内容 <span class="subtle">支持 Markdown</span>
+      <label class="quick-text-input" hidden><span class="field-label">编辑内容 <span class="subtle">支持 Markdown</span></span>
         <textarea data-quick-property="text" aria-label="编辑这段文字" rows="4" maxlength="35000">${esc(block.raw.trimEnd())}</textarea>
       </label>${insert}</section>`
   }
@@ -74,7 +74,7 @@ export function quickBlock(block, editor, index) {
       <input data-quick-property="${question ? 'name' : 'prompt'}" value="${esc(question ? block.name : block.prompt)}"
         aria-label="${question ? '问题' : '提交说明'}" maxlength="${question ? 60 : 300}">
     </label>
-    ${question ? `<label>选项 <span class="subtle">用逗号分隔，留空显示输入框</span>
+    ${question ? `<label><span class="field-label">选项 <span class="subtle">用逗号分隔，留空显示输入框</span></span>
       <input data-quick-property="options" value="${esc(block.options.join('，'))}" aria-label="选项" maxlength="700"></label>` : ''}
     <div class="quick-field-toggles">
       ${question ? '' : `<label><input type="checkbox" data-quick-property="enabled" ${enabled ? 'checked' : ''}> 启用</label>`}
@@ -95,8 +95,8 @@ export function quickLesson(editor) {
     </div>
   </div>
   <header class="lesson-header quick-heading">
-    <label>关卡名称<input data-quick-title value="${esc(editor.title)}" maxlength="100"></label>
-    <label>步骤别名 <span class="subtle">选填</span>
+    <label>关卡名称<textarea data-quick-title aria-label="关卡名称" rows="1" maxlength="100">${esc(editor.title)}</textarea></label>
+    <label><span class="field-label">步骤别名 <span class="subtle">选填</span></span>
       <input data-quick-alias value="${esc(editor.alias)}" maxlength="60" minlength="2"
         pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*" placeholder="例如 bind" autocapitalize="none" spellcheck="false">
       <small class="subtle">同一课程内不能重复，2–60 个英文字母、数字或短横线。</small></label>

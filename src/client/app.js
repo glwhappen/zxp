@@ -583,6 +583,15 @@ function queueCourseDraft(form = main.querySelector('[data-form="course"]')) {
   if (form.dataset.form === 'course-lesson') editor.autosave.queue(form.dataset.id, lessonDraft(form))
 }
 
+function fitQuickTitle() {
+  const title = main.querySelector('[data-quick-title]')
+  if (!title) return
+  title.style.height = 'auto'
+  title.style.height = title.scrollHeight + 2 + 'px'
+}
+
+window.addEventListener('resize', fitQuickTitle)
+
 async function startQuickLesson() {
   const context = state.current
   if (!context?.course?.canEdit || state.quick) return
@@ -600,6 +609,7 @@ async function startQuickLesson() {
   state.quick = editor
   main.querySelector('.lesson').classList.add('quick-lesson')
   main.querySelector('.lesson').innerHTML = quickLesson(editor)
+  fitQuickTitle()
   editor.autosave = createCourseAutosave({
     status(message, kind) {
       if (state.quick !== editor) return
@@ -1579,8 +1589,11 @@ document.addEventListener('input', event => {
   const input = event.target
   if (state.quick && input.matches('[data-quick-title], [data-quick-task], [data-quick-alias], [data-quick-property]')) {
     const editor = state.quick
-    if (input.matches('[data-quick-title]')) editor.title = input.value
-    else if (input.matches('[data-quick-alias]')) editor.alias = input.value
+    if (input.matches('[data-quick-title]')) {
+      if (/[\r\n]/.test(input.value)) input.value = input.value.replace(/[\r\n]+/g, ' ')
+      editor.title = input.value
+      fitQuickTitle()
+    } else if (input.matches('[data-quick-alias]')) editor.alias = input.value
     else if (input.matches('[data-quick-task]')) editor.task = input.value
     else {
       const block = editor.blocks.find(block => block.id === input.closest('[data-quick-block]').dataset.quickBlock)
