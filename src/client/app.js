@@ -354,6 +354,7 @@ function refreshView(path, version) {
 }
 
 async function navigate(path = location.pathname, push = false, focus = false) {
+  closeZoom()
   const version = ++navigation
   if (state.editor?.autosave?.dirty() && !await state.editor.autosave.flush()) {
     if (version === navigation && location.pathname !== state.path) history.pushState({}, '', state.path)
@@ -1226,6 +1227,37 @@ for (const type of ['focusin', 'pointerdown']) {
     if (target) warmView(target.pathname)
   })
 }
+
+// 教程里的截图：默认限宽显示，点一下看原图。
+let zoomLayer
+function closeZoom() {
+  if (!zoomLayer) return
+  zoomLayer.remove()
+  zoomLayer = null
+  document.body.style.overflow = ''
+}
+function openZoom(image) {
+  closeZoom()
+  zoomLayer = document.createElement('div')
+  zoomLayer.className = 'img-zoom'
+  zoomLayer.setAttribute('role', 'dialog')
+  zoomLayer.setAttribute('aria-label', image.alt || '查看图片')
+  const full = document.createElement('img')
+  full.src = image.currentSrc || image.src
+  full.alt = image.alt || ''
+  zoomLayer.append(full)
+  zoomLayer.addEventListener('click', closeZoom)
+  document.body.append(zoomLayer)
+  document.body.style.overflow = 'hidden'
+}
+document.addEventListener('click', event => {
+  if (event.target.closest('.img-zoom')) return
+  const image = event.target.closest('.markdown p > img:only-child')
+  if (image && image.naturalWidth) openZoom(image)
+})
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeZoom()
+})
 
 document.addEventListener('click', async event => {
   const link = event.target.closest('a[data-link]')

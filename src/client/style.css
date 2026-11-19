@@ -184,6 +184,10 @@ progress::-webkit-progress-value { background: var(--accent); }
 .markdown h1, .markdown h2, .markdown h3, .markdown h4 { font-size: 1.06em; line-height: 1.45; color: #292038; display: block; }
 .markdown a, .existing-file a { color: var(--accent-dark); text-decoration: underline; }
 .markdown img { max-width: 100%; height: auto; }
+/* 单独成段的截图（很多是手机长图）：限宽居中，点击看原图 */
+.markdown p > img:only-child { display: block; max-width: min(100%, 360px); margin-inline: auto; border: 1px solid #efe8fa; border-radius: 12px; background: #fff; cursor: zoom-in; }
+.img-zoom { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 18px; background: #180e28d9; cursor: zoom-out; }
+.img-zoom img { max-width: 100%; max-height: 100%; border-radius: 10px; background: #fff; cursor: zoom-out; }
 .markdown pre { overflow: auto; white-space: pre; padding: 12px; border-radius: 8px; background: #f5f1fa; }
 code { background: #f2edf8; border-radius: 4px; padding: 1px 4px; overflow-wrap: anywhere; }
 .markdown pre code { background: none; padding: 0; }
