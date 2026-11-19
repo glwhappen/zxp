@@ -140,7 +140,7 @@ export function stageStats(stage) {
 
 export function submission(stage, kind, prompt = '') {
   if (kind === 'learned') {
-    const missing = stage.missing ?? []
+    const missing = [...(stage.missing ?? []), ...(stage.missingFields ?? [])]
     const blocked = !stage.learned && missing.length > 0
     const label = stage.learned ? '已学会 · 撤销' : blocked ? '请先完成必填项' : '标记学会了'
     const attrs = blocked ? `disabled title="必填提交：${esc(kindLabels(missing))} 尚未完成"` : ''
@@ -177,19 +177,21 @@ function submissionSlot(stage, kind, prompt) {
 
 // 教程里的 {{ask:问题}}：窄输入框；带选项时是单选，选「其他」再自己填。
 function askSlot(stage, field, signedIn = true) {
-  const answer = (stage.answers ?? []).find(item => item.field === field.name)?.value ?? ''
+  const fieldKey = field.key ?? field.name
+  const required = stage.requiredFields?.includes(fieldKey)
+  const answer = (stage.answers ?? []).find(item => item.field === fieldKey)?.value ?? ''
   const choice = field.options.length > 0
   const matched = choice && field.options.includes(answer)
   const others = choice && answer && !matched
   const selected = matched ? answer : others ? '其他' : ''
   if (!signedIn) {
-    return `<div class="ask-field ${answer ? 'filled' : ''}" data-ask-field data-field="${esc(field.name)}" data-kind="locked">
+    return `<div class="ask-field ${answer ? 'filled' : ''}" data-ask-field data-field="${esc(fieldKey)}" data-kind="locked">
       <div class="ask-title">${icon('text', 15)}<span>${esc(field.name)}</span></div>
       <p class="subtle">登录后可以在这里填写。</p>
     </div>`
   }
-  return `<div class="ask-field ${answer ? 'filled' : ''}" data-ask-field data-field="${esc(field.name)}" data-kind="${choice ? 'choice' : 'text'}">
-    <div class="ask-title">${icon('text', 15)}<span>${esc(field.name)}</span><span class="saved ask-saved">已填</span></div>
+  return `<div class="ask-field ${answer ? 'filled' : ''}" data-ask-field data-field="${esc(fieldKey)}" data-kind="${choice ? 'choice' : 'text'}">
+    <div class="ask-title">${icon('text', 15)}<span>${esc(field.name)}</span>${required ? '<span class="saved required">必填</span>' : ''}<span class="saved ask-saved">已填</span></div>
     ${choice
       ? `<select data-ask-select aria-label="${esc(field.name)}">
           <option value="">请选择</option>
@@ -201,7 +203,7 @@ function askSlot(stage, field, signedIn = true) {
   </div>`
 }
 
-function markdownBlock(html) {
+export function markdownBlock(html) {
   const safe = DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea', 'style', 'iframe'],
@@ -231,7 +233,7 @@ function tutorialPanel(stage, signedIn) {
 
 // 「标记学会了」在教程末尾再放一次：learned 是每个关卡都有的方式，不依赖有没有作业提交。
 function finishPanel(stage) {
-  const hint = stage.required?.length
+  const hint = stage.required?.length || stage.requiredFields?.length
     ? '完成必填提交后，点右边的按钮记录学习进度。'
     : '点右边的按钮记录学习进度，之后随时可以回来撤销。'
   return `<section class="lesson-panel lesson-finish">
@@ -296,8 +298,9 @@ export function stagePage(stage, course, entry, signedIn) {
     </article>` : `<article class="lesson">
         <header class="lesson-header">
           <div class="lesson-kicker">${icon('layers', 17)} ${course ? `关卡 ${number} / ${course.stageCount}` : '独立关卡'}</div>
-          <div class="section-head"><h1>${esc(stage.title)}</h1>${stage.owned ? button('edit-stage', course ? '编辑原关卡' : '编辑', 'btn', 'pen',
-            `data-id="${esc(stage.id)}"`) : ''}</div>
+          <div class="section-head"><h1>${esc(stage.title)}</h1>${course?.canEdit
+            ? button('quick-lesson', '快速编辑', 'btn', 'pen')
+            : stage.owned ? button('edit-stage', '编辑', 'btn', 'pen', `data-id="${esc(stage.id)}"`) : ''}</div>
           <div class="lesson-status"><div class="stats" data-stage-stats>${stageStats(stage)}</div>${submissionSlot(stage, 'learned')}</div>
         </header>
         <section class="task-box"><h2>${icon('target', 20)} 学习任务</h2><p>${esc(stage.task)}</p></section>

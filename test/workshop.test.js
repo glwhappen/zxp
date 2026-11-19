@@ -668,6 +668,61 @@ test('authors can restore prerequisites and cannot introduce cycles or inaccessi
   await update(basePath, { title: base.title, visibility: 'private', expectedRevision: 1 }, 409)
 })
 
+test('inline course settings enforce required answers, isolate reuse, reject stale saves and restore history', async () => {
+  const [owner, student] = await Promise.all(['inlineowner', 'inlinestudent'].map(register))
+  const initial = await data('/api/courses', { method: 'POST', cookie: owner, json: {
+    title: '就地编辑课程', visibility: 'public', stageIds: ['step'], newStages: [{
+      clientId: 'step', title: '编辑前', task: '原任务',
+      tutorial: '## 原文\n\n{{ask:原问题}}\n\n{{submit:answer|写下你的练习答案}}', methods: ['answer'],
+    }],
+  } }, 201)
+  const stageId = initial.stages[0].id
+  const path = '/api/courses/' + initial.id
+  const lesson = path + '/stages/' + stageId
+  const scoped = '/api/stages/' + stageId + '?courseId=' + initial.id
+  const reuse = await data('/api/courses', { method: 'POST', cookie: owner, json: {
+    title: '同一关卡复用', visibility: 'public', stageIds: [stageId],
+  } }, 201)
+  const originalVersion = (await data(path + '/versions', { cookie: owner })).items[0]
+  const fields = '/api/stages/' + stageId + '/field'
+  await data(fields, { method: 'PUT', cookie: student, json: { field: '原问题', value: '原回答', courseId: initial.id } })
+  const payload = {
+    title: '直接改后的标题', task: '新任务',
+    tutorial: '## 修改过的正文\n\n{{ask:问题改名后|A,B|key=原问题}}\n\n{{submit:answer|补充三条具体的练习答案}}',
+    methods: ['learned', 'answer'], required: ['answer'], requiredFields: ['原问题'], expectedRevision: 0,
+  }
+  await data(lesson, { method: 'PUT', cookie: student, json: payload }, 403)
+  const saved = await data(lesson, { method: 'PUT', cookie: owner, json: payload })
+  assert.equal(saved.course.revision, 1)
+  await data(lesson, { method: 'PUT', cookie: owner, json: payload }, 409)
+  const stage = await data(scoped, { cookie: student })
+  assert.deepEqual(stage.required, ['answer'])
+  assert.deepEqual(stage.requiredFields, ['原问题'])
+  assert.deepEqual(stage.missingFields, [])
+  assert.equal(stage.answers[0].value, '原回答')
+  assert.equal((await data('/api/stages/' + stageId + '?courseId=' + reuse.id, { cookie: student })).title, '编辑前')
+  const learnedPath = '/api/stages/' + stageId + '/learned'
+  const learn = status => data(learnedPath, { method: 'PUT', cookie: student, json: { learned: true, courseId: initial.id } }, status)
+  await learn(409)
+  await data('/api/stages/' + stageId + '/answer', { method: 'PUT', cookie: student, json: { answer: '完成练习', courseId: initial.id } })
+  await learn(200)
+  await data(fields, { method: 'PUT', cookie: student, json: { field: '原问题', value: '', courseId: initial.id } })
+  await learn(409)
+  const incomplete = await data(path, { cookie: student })
+  assert.equal(incomplete.completedCount, 0)
+  assert.deepEqual(incomplete.stages[0].missingFields, ['原问题'])
+  assert.equal((await data('/api/courses?scope=joined', { cookie: student })).find(course => course.id === initial.id).completedCount, 0)
+  await data(lesson, { method: 'PUT', cookie: owner, json: { ...payload, expectedRevision: 1, requiredFields: ['并不存在的问题'] } }, 400)
+  const restored = await data(path + '/versions/' + originalVersion.id, {
+    method: 'POST', cookie: owner, json: { expectedRevision: 1 },
+  })
+  assert.equal(restored.stages[0].title, '编辑前')
+  const restoredStage = await data(scoped, { cookie: student })
+  assert.deepEqual(restoredStage.required, [])
+  assert.deepEqual(restoredStage.requiredFields, [])
+  assert.equal(restoredStage.submissions[0].answer, '完成练习')
+})
+
 async function oidcFlow({ badSignature = false, badNonce = false } = {}) {
   const start = await request('/api/auth/oidc/start?return_to=%2Fadmin', { redirect: 'manual' })
   assert.equal(start.status, 303, await start.text())

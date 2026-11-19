@@ -5,6 +5,7 @@ import {
   assertSubmissionMarkers, courseAtRevision, courseDetail, readableStage, stageDetail, stageInput,
 } from './learning.js'
 import { insertPrerequisites } from './prerequisites.js'
+import { tutorialFields } from '../client/tutorial.js'
 
 export const editModes = ['owner', 'shared', 'public']
 
@@ -112,10 +113,10 @@ export async function restoreCourseVersion(db, user, id, versionId, input = {}) 
     statement(db, `UPDATE courses SET title = ?, description = ?, category = ?, theme = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       snapshot.title, snapshot.description, snapshot.category, snapshot.theme, id),
     statement(db, 'DELETE FROM course_stages WHERE course_id = ?', id),
-    statement(db, `INSERT INTO course_stages (course_id, stage_id, position)
-      SELECT ?, stage_id, position FROM course_version_stages WHERE version_id = ?`, id, versionId),
-    statement(db, `INSERT INTO course_stage_content (course_id, stage_id, title, task, tutorial)
-      SELECT ?, stage_id, title, task, tutorial FROM course_version_stages WHERE version_id = ?`, id, versionId),
+    statement(db, `INSERT INTO course_stages (course_id, stage_id, position, requires)
+      SELECT ?, stage_id, position, requires FROM course_version_stages WHERE version_id = ?`, id, versionId),
+    statement(db, `INSERT INTO course_stage_content (course_id, stage_id, title, task, tutorial, methods, required, required_fields)
+      SELECT ?, stage_id, title, task, tutorial, methods, required, required_fields FROM course_version_stages WHERE version_id = ?`, id, versionId),
     ...(course.owned ? [
       statement(db, 'DELETE FROM course_prerequisites WHERE course_id = ?', id),
       insertPrerequisites(db, id, snapshot.prerequisites),
@@ -133,16 +134,30 @@ export async function saveCourseLesson(db, user, id, stageId, input) {
   const title = field(input.title, '关卡名称', 100)
   const task = field(input.task, '学习任务', 5000)
   const tutorial = field(input.tutorial ?? '', '教程', 35_000, false)
-  const changed = title !== stage.title || task !== stage.task || tutorial !== stage.tutorial
-  if (changed) assertSubmissionMarkers(tutorial, stage.methods)
+  const settings = stageInput({
+    title, task, tutorial, methods: input.methods ?? stage.methods, required: input.required ?? stage.required,
+    visibility: stage.visibility,
+  })
+  const requiredFields = input.requiredFields ?? stage.requiredFields
+  const known = new Set(tutorialFields(tutorial).map(item => item.key ?? item.name))
+  if (!Array.isArray(requiredFields) || new Set(requiredFields).size !== requiredFields.length
+    || requiredFields.some(name => !known.has(name))) fail(400, '必填提问必须是教程里的提问项。')
+  if (settings.required.some(kind => !settings.methods.includes(kind))) fail(400, '必填提交必须启用。')
+  const settingsChanged = JSON.stringify(settings.methods) !== JSON.stringify(stage.methods)
+    || JSON.stringify(settings.required) !== JSON.stringify(stage.required)
+    || JSON.stringify(requiredFields) !== JSON.stringify(stage.requiredFields)
+  const changed = title !== stage.title || task !== stage.task || tutorial !== stage.tutorial || settingsChanged
+  if (changed) assertSubmissionMarkers(tutorial, settings.methods)
   if (changed || input.checkpoint) {
     const queries = [guardCourse(db, id, user.id, revision, { advance: changed })]
     if (changed) {
-      queries.push(...checkpoint(db, id, revision, user.id, 'interval', { periodic: true }))
+      queries.push(...checkpoint(db, id, revision, user.id, settingsChanged ? 'structure' : 'interval', { periodic: !settingsChanged }))
       queries.push(statement(db, `
-        INSERT INTO course_stage_content (course_id, stage_id, title, task, tutorial) VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(course_id, stage_id) DO UPDATE SET title = excluded.title, task = excluded.task, tutorial = excluded.tutorial
-      `, id, stageId, title, task, tutorial))
+        INSERT INTO course_stage_content (course_id, stage_id, title, task, tutorial, methods, required, required_fields)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(course_id, stage_id) DO UPDATE SET title = excluded.title, task = excluded.task,
+          tutorial = excluded.tutorial, methods = excluded.methods, required = excluded.required, required_fields = excluded.required_fields
+      `, id, stageId, title, task, tutorial, JSON.stringify(settings.methods), JSON.stringify(settings.required), JSON.stringify(requiredFields)))
       queries.push(statement(db, 'UPDATE courses SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', id))
     }
     if (input.checkpoint) queries.push(...checkpoint(db, id, revision + Number(changed), user.id, 'manual'))

@@ -23,12 +23,24 @@ export function askField(token) {
   if (token.type !== 'paragraph') return
   const match = /^\{\{ask:(.+?)\}\}$/.exec(token.raw.trim())
   if (!match) return
-  const [rawName, rawOptions = ''] = match[1].split('|')
+  const [rawName, rawOptions = '', rawKey] = match[1].split('|')
   const name = rawName.trim()
   if (!name || name.length > 60 || /[\n{}]/.test(name)) return
   const options = rawOptions.split(/[,，]/).map(value => value.trim()).filter(Boolean)
   if (options.length > 12) return
-  return { name, options }
+  if (rawKey !== undefined && (!rawKey.startsWith('key=') || !rawKey.slice(4).trim()
+    || rawKey.slice(4).length > 60 || /[\n{}]/.test(rawKey))) return
+  return { name, options, ...(rawKey === undefined ? {} : { key: rawKey.slice(4).trim() }) }
+}
+
+export function tutorialFields(markdown) {
+  return marked.lexer(markdown).map(askField).filter(Boolean)
+}
+
+export function tutorialTokens(markdown) {
+  return marked.lexer(markdown).map(token => ({
+    raw: token.raw, type: token.type, field: askField(token), submission: markerSpec(token),
+  }))
 }
 
 export function hasSubmissionMarker(markdown, kind) {
@@ -36,7 +48,7 @@ export function hasSubmissionMarker(markdown, kind) {
 }
 
 export function hasAskMarker(markdown, name) {
-  return marked.lexer(markdown).some(token => askField(token)?.name === name)
+  return tutorialFields(markdown).some(field => (field.key ?? field.name) === name)
 }
 
 export function layoutTutorial(markdown, kinds) {

@@ -96,7 +96,8 @@ tool('course_restore', '将课程资料、关卡编排和讲义恢复到历史�
 }, ['courseId', 'versionId', 'expectedRevision'],
 ({ DB }, user, args) => restoreCourseVersion(DB, user, id(args, 'courseId'), id(args, 'versionId'), args))
 tool('course_lesson_update', '更新本课程里的关卡名称、任务和讲义。', {
-  courseId: string, stageId: string, title: string, task: string, tutorial: stage.tutorial, expectedRevision, checkpoint: boolean,
+  courseId: string, stageId: string, title: string, task: string, tutorial: stage.tutorial,
+  methods: stage.methods, required: stage.required, requiredFields: array(string), expectedRevision, checkpoint: boolean,
 }, ['courseId', 'stageId', 'title', 'task', 'tutorial', 'expectedRevision'],
 ({ DB }, user, args) => saveCourseLesson(DB, user, id(args, 'courseId'), id(args, 'stageId'), args))
 tool('course_stage_create', '在可编辑课程末尾创建关卡。新关卡使用课程的可见性，可用 required 设定必填提交。', {

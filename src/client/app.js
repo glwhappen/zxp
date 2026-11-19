@@ -2,6 +2,7 @@ import { icon } from './icons.js'
 import { adminPage, providerNames } from './admin.js'
 import { createViewCache } from './view-cache.js'
 import { createCourseAutosave } from './course-autosave.js'
+import { lessonBlocks, lessonPayload, quickBlock, quickLesson, updateBlock } from './quick-lesson.js'
 import { courseHistory, courseSharingForm, courseVersionPreview, editorChoices } from './collaboration.js'
 import { wishBoard, wishCoursePicker, wishCourses, wishDiscussion, wishForm, wishHeading, wishPage, wishPath } from './wishes.js'
 import { askMarker, hasSubmissionMarker, submissionKinds, submissionMarker, submissionSpecs } from './tutorial.js'
@@ -51,6 +52,7 @@ async function refreshIdentity() {
 
 function applyProfile(profile) {
   if (state.user?.id !== profile.user?.id) state.editor?.autosave?.discard()
+  if (state.user?.id !== profile.user?.id) state.quick?.autosave.discard()
   views.acceptIdentity(profile.user?.id ?? null)
   Object.assign(state, profile)
 }
@@ -268,6 +270,8 @@ function stagesPage(stages) {
 
 function paintView({ profile, view }, path) {
   state.editor?.autosave?.discard()
+  state.quick?.autosave.discard()
+  state.quick = null
   applyProfile(profile)
   state.path = path
   state.current = null
@@ -356,6 +360,10 @@ function refreshView(path, version) {
 async function navigate(path = location.pathname, push = false, focus = false) {
   closeZoom()
   const version = ++navigation
+  if (state.quick?.autosave.dirty() && !await state.quick.autosave.flush()) {
+    if (version === navigation && location.pathname !== state.path) history.pushState({}, '', state.path)
+    return
+  }
   if (state.editor?.autosave?.dirty() && !await state.editor.autosave.flush()) {
     if (version === navigation && location.pathname !== state.path) history.pushState({}, '', state.path)
     return
@@ -410,13 +418,19 @@ function scheduleAskSave(box) {
   askTimers.set(box, setTimeout(async () => {
     if (!requireLogin()) return
     try {
-      const saved = await api('stages/' + key(stage.id) + '/field', { method: 'PUT', body: { field: box.dataset.field, value } })
+      const context = state.current
+      if (state.quick || context?.stage !== stage) return
+      const saved = await api('stages/' + key(stage.id) + '/field', {
+        method: 'PUT', body: { field: box.dataset.field, value, courseId: context.course?.id },
+      })
       const answers = stage.answers ?? (stage.answers = [])
       const index = answers.findIndex(item => item.field === saved.field)
       if (saved.value) {
         if (index >= 0) answers[index] = { ...answers[index], value: saved.value }
         else answers.push(saved)
       } else if (index >= 0) answers.splice(index, 1)
+      const updated = await api('stages/' + key(stage.id) + (context.course ? '?courseId=' + key(context.course.id) : ''))
+      applyStage(updated, 'field', context)
     } catch (error) {
       announce(error.message, true)
     }
@@ -540,6 +554,56 @@ function queueCourseDraft(form = main.querySelector('[data-form="course"]')) {
   if (form.dataset.form === 'course-lesson') editor.autosave.queue(form.dataset.id, lessonDraft(form))
 }
 
+async function startQuickLesson() {
+  const context = state.current
+  if (!context?.course?.canEdit || state.quick) return
+  const data = await api('view?path=' + key(state.path))
+  if (state.current !== context || data.profile.user?.id !== state.user?.id || !data.view.course?.canEdit) return
+  Object.assign(context, { course: data.view.course, stage: data.view.stage })
+  if (!context.stage) return
+  const editor = {
+    context, userId: state.user.id, course: context.course, stageId: context.stage.id,
+    title: context.stage.title, task: context.stage.task, blocks: lessonBlocks(context.stage.tutorial),
+    enabled: [...context.stage.methods], required: [...context.stage.required],
+    requiredFields: [...context.stage.requiredFields],
+  }
+  state.quick = editor
+  main.querySelector('.lesson').classList.add('quick-lesson')
+  main.querySelector('.lesson').innerHTML = quickLesson(editor)
+  editor.autosave = createCourseAutosave({
+    status(message, kind) {
+      if (state.quick !== editor) return
+      const status = main.querySelector('[data-quick-save]')
+      status.textContent = message
+      status.toggleAttribute('data-error', Boolean(kind))
+      main.querySelector('[data-quick-reload]').hidden = !kind
+    },
+    async send(target, payload) {
+      const saved = await api('courses/' + key(editor.course.id) + '/stages/' + key(editor.stageId), {
+        method: 'PUT', body: { ...payload, expectedRevision: editor.course.revision, expectedEditorId: editor.userId },
+      })
+      editor.course = saved.course
+      if (state.quick !== editor || state.user?.id !== editor.userId) return
+      context.course = saved.course
+      context.stage = { ...context.stage, ...saved.stage }
+      views.invalidate((path, view) => view.course?.id === saved.course.id || ['explore', 'shelf'].includes(view.type))
+      cachePage(coursePath(saved.course.id), { type: 'course', course: saved.course })
+      main.querySelector('[data-outline]').innerHTML = progress(saved.course) + outline(saved.course, editor.stageId)
+    },
+  })
+  editor.autosave.remember('lesson', lessonPayload(editor))
+}
+
+function queueQuickLesson() {
+  const editor = state.quick
+  if (editor) editor.autosave.queue('lesson', lessonPayload(editor))
+}
+
+function paintQuickBlocks() {
+  const editor = state.quick
+  main.querySelector('[data-quick-blocks]').innerHTML = editor.blocks.map((block, index) => quickBlock(block, editor, index)).join('')
+}
+
 async function searchCollaborators() {
   const editor = state.editor
   const sharing = editor.sharing
@@ -608,9 +672,12 @@ function applyStage(stage, kind, context) {
   context.stage = stage
   main.querySelector('[data-stage-stats]').innerHTML = stageStats(stage)
   const slot = main.querySelector(`[data-submission="${kind}"]`)
-  const focused = slot.contains(document.activeElement)
-  slot.innerHTML = submission(stage, kind)
-  if (focused) slot.querySelector('button:not(:disabled)')?.focus({ preventScroll: true })
+  if (slot) {
+    const focused = slot.contains(document.activeElement)
+    const prompt = slot.querySelector('.submit-prompt')?.textContent ?? ''
+    slot.innerHTML = submission(stage, kind, prompt)
+    if (focused) slot.querySelector('button:not(:disabled)')?.focus({ preventScroll: true })
+  }
   if (kind !== 'learned') {
     main.querySelectorAll('[data-submission="learned"]').forEach(slot => { slot.innerHTML = submission(stage, 'learned') })
   }
@@ -664,6 +731,95 @@ async function handleAction(control) {
   const action = control.dataset.action
   const id = control.dataset.id
   switch (action) {
+    case 'quick-lesson':
+      await startQuickLesson()
+      break
+    case 'quick-insert-menu': {
+      const menu = control.closest('.quick-insert').querySelector('.quick-insert-menu')
+      menu.hidden = !menu.hidden
+      break
+    }
+    case 'quick-text': {
+      const block = control.closest('[data-quick-block]')
+      block.querySelector('.quick-text-preview').hidden = true
+      const area = block.querySelector('.quick-text-input')
+      area.hidden = false
+      const input = area.querySelector('textarea')
+      input.style.height = input.scrollHeight + 'px'
+      input.focus()
+      break
+    }
+    case 'quick-done':
+    case 'quick-reload': {
+      const editor = state.quick
+      if (action === 'quick-done' && !await editor.autosave.flush()) break
+      if (state.quick !== editor) break
+      editor.autosave.discard()
+      state.quick = null
+      views.invalidate((path) => path === state.path)
+      await navigate()
+      break
+    }
+    case 'quick-checkpoint': {
+      const editor = state.quick
+      if (!await editor.autosave.flush() || state.quick !== editor) break
+      const saved = await api('courses/' + key(editor.course.id) + '/stages/' + key(editor.stageId), {
+        method: 'PUT', body: { ...lessonPayload(editor), checkpoint: true,
+          expectedRevision: editor.course.revision, expectedEditorId: editor.userId },
+      })
+      if (state.quick === editor) {
+        editor.course = saved.course
+        announce('当前版本已保存。')
+      }
+      break
+    }
+    case 'quick-add': {
+      const editor = state.quick
+      const type = control.dataset.type ?? main.querySelector('[data-quick-type]').value
+      if (type !== 'text' && type !== 'question' && editor.blocks.some(block => block.type === type)) {
+        announce('这类提交框已经存在，可以在原位置编辑。')
+        break
+      }
+      const question = type === 'question'
+      const block = {
+        id: crypto.randomUUID(), type, name: '新问题', fieldKey: 'q-' + crypto.randomUUID(),
+        options: [], prompt: '请在这里填写具体的提交要求',
+      }
+      block.raw = type === 'text' ? '新段落\n\n' : question
+        ? '{{ask:新问题||key=' + block.fieldKey + '}}\n\n' : submissionMarker(type, block.prompt) + '\n\n'
+      if (editor.blocks.length && !editor.blocks.at(-1).raw.endsWith('\n\n')) editor.blocks.at(-1).raw += '\n\n'
+      const after = editor.blocks.findIndex(item => item.id === control.dataset.after)
+      editor.blocks.splice(after < 0 ? editor.blocks.length : after + 1, 0, block)
+      if (!question && type !== 'text') editor.enabled.push(type)
+      paintQuickBlocks()
+      queueQuickLesson()
+      main.querySelector(`[data-quick-block="${block.id}"]`).scrollIntoView({ block: 'center', behavior: 'smooth' })
+      break
+    }
+    case 'quick-up':
+    case 'quick-down':
+    case 'quick-remove': {
+      const editor = state.quick
+      const index = editor.blocks.findIndex(block => block.id === id)
+      if (index < 0) break
+      if (action === 'quick-remove') {
+        const [block] = editor.blocks.splice(index, 1)
+        if (block.type === 'question') editor.requiredFields = editor.requiredFields.filter(key => key !== block.fieldKey)
+        else if (block.type !== 'text' && !editor.blocks.some(item => item.type === block.type)) {
+          editor.enabled = editor.enabled.filter(kind => kind !== block.type)
+          editor.required = editor.required.filter(kind => kind !== block.type)
+        }
+      } else {
+        const next = index + (action === 'quick-up' ? -1 : 1)
+        if (next < 0 || next >= editor.blocks.length) break
+        for (const block of editor.blocks) if (!block.raw.endsWith('\n\n')) block.raw += '\n\n'
+        const [block] = editor.blocks.splice(index, 1)
+        editor.blocks.splice(next, 0, block)
+      }
+      paintQuickBlocks()
+      queueQuickLesson()
+      break
+    }
     case 'login':
     case 'register': login(action); break
     case 'account': account(); break
@@ -1252,6 +1408,7 @@ function openZoom(image) {
 }
 document.addEventListener('click', event => {
   if (event.target.closest('.img-zoom')) return
+  if (event.target.closest('.quick-lesson')) return
   const image = event.target.closest('.markdown p > img:only-child')
   if (image && image.naturalWidth) openZoom(image)
 })
@@ -1301,6 +1458,26 @@ document.addEventListener('submit', async event => {
 
 document.addEventListener('input', event => {
   const input = event.target
+  if (state.quick && input.matches('[data-quick-title], [data-quick-task], [data-quick-property]')) {
+    const editor = state.quick
+    if (input.matches('[data-quick-title]')) editor.title = input.value
+    else if (input.matches('[data-quick-task]')) editor.task = input.value
+    else {
+      const block = editor.blocks.find(block => block.id === input.closest('[data-quick-block]').dataset.quickBlock)
+      const property = input.dataset.quickProperty
+      if (property === 'enabled' || property === 'required') {
+        const kind = block.type === 'question' ? block.fieldKey : block.type
+        const list = property === 'enabled' ? 'enabled' : block.type === 'question' ? 'requiredFields' : 'required'
+        editor[list] = editor[list].filter(value => value !== kind)
+        if (input.checked) editor[list].push(kind)
+        if (property === 'enabled' && !input.checked) editor.required = editor.required.filter(value => value !== kind)
+        const container = input.closest('[data-quick-block]')
+        container.outerHTML = quickBlock(block, editor, editor.blocks.indexOf(block))
+      } else updateBlock(block, input)
+    }
+    if (!event.isComposing) queueQuickLesson()
+    return
+  }
   if (input.matches('[data-prerequisite-mode]')) {
     const requirement = state.editor.prerequisites.find(item => item.courseId === input.dataset.id)
     requirement.mode = input.value
@@ -1341,6 +1518,15 @@ document.addEventListener('input', event => {
   }
 })
 
+document.addEventListener('focusout', event => {
+  if (!state.quick || !event.target.matches('[data-quick-property="text"]')) return
+  const container = event.target.closest('[data-quick-block]')
+  if (container.contains(event.relatedTarget)) return
+  const editor = state.quick
+  const block = editor.blocks.find(block => block.id === container.dataset.quickBlock)
+  container.outerHTML = quickBlock(block, editor, editor.blocks.indexOf(block))
+})
+
 // iOS Safari 忽略 user-scalable=no，用 gesture 事件挡住双指缩放。
 for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
   document.addEventListener(type, event => event.preventDefault(), { passive: false })
@@ -1356,7 +1542,7 @@ dialog.addEventListener('keydown', event => {
   }
 })
 window.addEventListener('beforeunload', event => {
-  if (!state.editor?.autosave?.dirty()) return
+  if (!state.editor?.autosave?.dirty() && !state.quick?.autosave.dirty()) return
   event.preventDefault()
   event.returnValue = ''
 })
@@ -1364,6 +1550,7 @@ window.addEventListener('popstate', () => navigate())
 accountEvents?.addEventListener('message', () => {
   identityRevision++
   state.editor?.autosave?.discard()
+  state.quick?.autosave.discard()
   views.invalidate()
   navigate()
 })

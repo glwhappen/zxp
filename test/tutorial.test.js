@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { hasAskMarker, hasSubmissionMarker, layoutTutorial, submissionSpecs } from '../src/client/tutorial.js'
+import { hasAskMarker, hasSubmissionMarker, layoutTutorial, submissionSpecs, tutorialTokens } from '../src/client/tutorial.js'
 
 test('submissions without markers stay at the end of the tutorial', () => {
   const markdown = '## 获取密钥\n\n记录模型名称。\n\n## 配置客户端\n\n填写配置。\n\n## 验证连接\n\n检查模型的回复。'
@@ -68,4 +68,14 @@ test('submission markers keep their prompt text', () => {
   const { blocks } = layoutTutorial(markdown, ['answer'])
   assert.deepEqual(blocks[1], { kind: 'answer', prompt: '写下 3 个候选品类和理由' })
   assert.deepEqual(submissionSpecs(markdown), [{ kind: 'answer', prompt: '写下 3 个候选品类和理由' }])
+})
+
+test('edited question labels retain their original answer key and token source is lossless', () => {
+  const markdown = '## 我的教程\n\n{{ask:现在的标题|选项一,选项二|key=原来的问题}}\n\n~~~text\n{{ask:代码里的标记}}\n~~~\n'
+  assert.equal(hasAskMarker(markdown, '原来的问题'), true)
+  assert.equal(hasAskMarker(markdown, '现在的标题'), false)
+  assert.equal(tutorialTokens(markdown).map(block => block.raw).join(''), markdown)
+  assert.deepEqual(layoutTutorial(markdown, []).blocks.find(block => block.field).field, {
+    name: '现在的标题', options: ['选项一', '选项二'], key: '原来的问题',
+  })
 })

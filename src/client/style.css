@@ -283,6 +283,42 @@ dialog[open] { display: flex; flex-direction: column; max-height: calc(100dvh - 
 .account-name + p, .account-id { overflow-wrap: anywhere; }
 .editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 10px; }
 [data-course-save-status], [data-lesson-save-status] { color: var(--muted); font-size: 14px; }
+[data-quick-save] { color: var(--muted); font-size: 13px; margin-left: 12px; overflow-wrap: anywhere; }
+[data-quick-save][data-error] { color: #a72b3c; }
+.quick-toolbar { position: sticky; top: 10px; z-index: 5; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 13px 16px; border: 1px solid #dcd2f3; border-radius: 14px; background: #faf7ff; box-shadow: 0 3px 15px #37235a0d; margin-bottom: 16px; }
+.quick-toolbar .inline-actions { flex-wrap: wrap; }
+.quick-heading { display: grid; gap: 14px; }
+.quick-heading label { margin: 0; }
+.quick-heading input { font-size: 23px; font-weight: 700; }
+.quick-blocks { display: grid; gap: 12px; margin: 16px 0; }
+.quick-block { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: white; padding: 18px; }
+.quick-text { padding: 8px 12px; }
+.quick-text-preview { display: block; width: 100%; text-align: left; border: 0; background: none; color: inherit; padding: 8px 0; cursor: text; }
+.quick-text-preview:hover { background: #faf8fe; }
+.quick-text .markdown { padding-right: 84px; }
+.quick-text textarea { min-height: 130px; resize: vertical; }
+.quick-edit-hint { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; margin-top: 9px; }
+.quick-block-actions { display: flex; gap: 1px; }
+.quick-text > .quick-block-actions { position: absolute; top: 12px; right: 10px; z-index: 1; }
+.quick-field { display: grid; gap: 13px; }
+.quick-field .section-head { margin: 0; }
+.quick-field h3 { display: flex; gap: 8px; align-items: center; font-size: 15px; }
+.quick-field label { margin: 0; }
+.quick-field-toggles { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.quick-field-toggles label { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.quick-field-toggles input { width: auto; }
+.quick-add { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
+.quick-add label { margin: 0; }
+.quick-insert { margin-top: 10px; }
+.quick-insert-trigger { display: inline-flex; align-items: center; gap: 5px; padding: 3px 0; border: 0; background: none; color: var(--muted); font-size: 11px; cursor: pointer; }
+.quick-insert-menu { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.quick-insert-menu .btn { padding: 5px 9px; font-size: 12px; }
+@media (max-width: 600px) {
+  .quick-toolbar { top: 6px; padding: 12px; }
+  .quick-toolbar .btn { font-size: 12px; padding: 7px 10px; }
+  .quick-text .markdown { padding-top: 35px; padding-right: 0; }
+  .quick-block { padding: 14px; }
+}
 [data-course-save-status][data-error], [data-lesson-save-status][data-error] { color: #943047; }
 .collaborator-picker, [data-collaborator-choices] { display: grid; gap: 9px; }
 .collaborator-picker .inline-actions { flex-wrap: nowrap; }

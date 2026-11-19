@@ -31,9 +31,12 @@ const courseSelect = `
     (SELECT COUNT(*) FROM course_stages cs WHERE cs.course_id = c.id) AS stageCount,
     (SELECT COUNT(*) FROM course_stages cs JOIN progress p ON p.stage_id = cs.stage_id
       JOIN stages s ON s.id = cs.stage_id
+      LEFT JOIN course_stage_content l ON l.course_id = cs.course_id AND l.stage_id = cs.stage_id
       WHERE cs.course_id = c.id AND p.user_id = ?1
-      AND NOT EXISTS (SELECT 1 FROM json_each(s.required) r WHERE NOT EXISTS (
-        SELECT 1 FROM submissions sub WHERE sub.stage_id = cs.stage_id AND sub.user_id = ?1 AND sub.kind = r.value)))
+      AND NOT EXISTS (SELECT 1 FROM json_each(COALESCE(l.required, s.required)) r WHERE NOT EXISTS (
+        SELECT 1 FROM submissions sub WHERE sub.stage_id = cs.stage_id AND sub.user_id = ?1 AND sub.kind = r.value))
+      AND NOT EXISTS (SELECT 1 FROM json_each(COALESCE(l.required_fields, '[]')) r WHERE NOT EXISTS (
+        SELECT 1 FROM stage_answers a WHERE a.stage_id = cs.stage_id AND a.user_id = ?1 AND a.field = r.value AND trim(a.value) <> '')))
       AS completedCount,
     (SELECT COUNT(*) FROM enrollments e WHERE e.course_id = c.id) AS learnerCount
   FROM courses c JOIN users u ON u.id = c.owner_id
@@ -59,9 +62,11 @@ export async function courseDetail(db, user, courseId) {
     statement(db, courseSelect + ` WHERE c.id = ?2 AND ${readableCourse('?1')}`, id, courseId),
     statement(db, `
       SELECT s.id, COALESCE(l.title, s.title) AS title, COALESCE(l.task, s.task) AS task,
-        s.visibility, s.methods, s.required, cs.requires,
+        s.visibility, COALESCE(l.methods, s.methods) AS methods, COALESCE(l.required, s.required) AS required,
+        COALESCE(l.required_fields, '[]') AS required_fields, cs.requires,
         EXISTS(SELECT 1 FROM progress p WHERE p.stage_id = s.id AND p.user_id = ?1) AS marked,
-        (SELECT json_group_array(kind) FROM submissions sub WHERE sub.stage_id = s.id AND sub.user_id = ?1) AS submitted
+        (SELECT json_group_array(kind) FROM submissions sub WHERE sub.stage_id = s.id AND sub.user_id = ?1) AS submitted,
+        (SELECT json_group_array(field) FROM stage_answers a WHERE a.stage_id = s.id AND a.user_id = ?1 AND trim(a.value) <> '') AS answered
       FROM course_stages cs JOIN stages s ON s.id = cs.stage_id JOIN courses c ON c.id = cs.course_id
       LEFT JOIN course_stage_content l ON l.course_id = c.id AND l.stage_id = s.id
       WHERE cs.course_id = ?2 AND ${readableCourse('?1')} ORDER BY cs.position
@@ -77,6 +82,8 @@ export async function courseDetail(db, user, courseId) {
     const methods = enabledMethods(entry.methods)
     const required = requiredMethods(entry.required, methods)
     const missing = missingRequired(required, parseList(entry.submitted))
+    const requiredFields = parseList(entry.required_fields)
+    const missingFields = missingRequired(requiredFields, parseList(entry.answered))
     return {
       id: entry.id,
       title: entry.title,
@@ -85,8 +92,9 @@ export async function courseDetail(db, user, courseId) {
       methods,
       required,
       missing,
+      requiredFields, missingFields,
       requires: parseList(entry.requires).filter(dependency => known.has(dependency)),
-      learned: Boolean(entry.marked) && !missing.length,
+      learned: Boolean(entry.marked) && !missing.length && !missingFields.length,
     }
   })
   const byId = new Map(stages.map(stage => [stage.id, stage]))
@@ -129,7 +137,9 @@ function stageQuery(db, user, stageId, courseId) {
     field(courseId, '课程 ID', 100)
     return statement(db, `
       SELECT s.id, COALESCE(l.title, s.title) AS title, COALESCE(l.task, s.task) AS task,
-        COALESCE(l.tutorial, s.tutorial) AS tutorial, s.visibility, s.methods, s.required, s.owner_id = ?1 AS owned,
+        COALESCE(l.tutorial, s.tutorial) AS tutorial, s.visibility,
+        COALESCE(l.methods, s.methods) AS methods, COALESCE(l.required, s.required) AS required,
+        COALESCE(l.required_fields, '[]') AS required_fields, s.owner_id = ?1 AS owned,
         u.name AS author, l.stage_id IS NOT NULL AS customized
       FROM course_stages cs JOIN courses c ON c.id = cs.course_id JOIN stages s ON s.id = cs.stage_id
       JOIN users u ON u.id = s.owner_id
@@ -148,7 +158,8 @@ function stageQuery(db, user, stageId, courseId) {
 function stageData(stage) {
   if (!stage) fail(404, '关卡不存在或当前账号无权访问。')
   const methods = enabledMethods(stage.methods)
-  return { ...stage, owned: Boolean(stage.owned), methods, required: requiredMethods(stage.required, methods) }
+  return { ...stage, owned: Boolean(stage.owned), methods, required: requiredMethods(stage.required, methods),
+    requiredFields: parseList(stage.required_fields) }
 }
 
 export async function readableStage(db, user, stageId, courseId) {
@@ -182,9 +193,10 @@ export async function stageDetail(db, user, stageId, courseId) {
   const stage = stageData(stageResult.results[0])
   const { myLearned, ...stats } = counts.results[0]
   const missing = missingRequired(stage.required, submissions.results.map(entry => entry.kind))
+  const missingFields = missingRequired(stage.requiredFields, answers.results.filter(entry => entry.value.trim()).map(entry => entry.field))
   const notes = await listNotes(db, user, stageId)
-  return { ...stage, learned: Boolean(myLearned) && !missing.length, stats,
-    submissions: submissions.results, answers: answers.results, missing,
+  return { ...stage, learned: Boolean(myLearned) && !missing.length && !missingFields.length, stats,
+    submissions: submissions.results, answers: answers.results, missing, missingFields,
     notes: notes.notes, noteCanWrite: notes.canWrite }
 }
 
@@ -407,9 +419,10 @@ export async function saveStage(db, user, data, stageId) {
 
 
 // 教程里 {{ask:问题}} 的填写：按字段名存一条，value 为空表示清空。
-export async function saveFieldAnswer(db, user, stageId, fieldName, value) {
+export async function saveFieldAnswer(db, user, stageId, fieldName, value, courseId) {
   const id = requireUser(user)
-  await readableStage(db, user, stageId)
+  await readableStage(db, user, stageId, courseId)
+  await requireStageLearning(db, user, stageId, courseId)
   const name = field(fieldName, '提问项', 60)
   if (/[\n{}|]/.test(name)) fail(400, '提问项名称无效。')
   const text = field(value ?? '', '填写内容', 2000, false)
@@ -457,6 +470,10 @@ export async function markLearned(db, user, stageId, learned, courseId) {
       'SELECT kind FROM submissions WHERE stage_id = ? AND user_id = ?', stageId, id))
     const missing = missingRequired(stage.required, submitted.map(entry => entry.kind))
     if (missing.length) fail(409, `请先完成必填提交：${kindLabels(missing)}。`)
+    const answered = await rows(statement(db,
+      "SELECT field FROM stage_answers WHERE stage_id = ? AND user_id = ? AND trim(value) <> ''", stageId, id))
+    const missingFields = missingRequired(stage.requiredFields, answered.map(entry => entry.field))
+    if (missingFields.length) fail(409, `请先填写必填提问：${missingFields.join('、')}。`)
     await statement(db, 'INSERT OR IGNORE INTO progress (stage_id, user_id) VALUES (?, ?)', stageId, id).run()
     await joinFromStage(db, user, courseId, stageId)
   } else {

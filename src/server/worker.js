@@ -101,7 +101,7 @@ async function api(request, env, url) {
     if (id && action === 'field' && method === 'PUT') {
       requireUser(user)
       const data = await objectBody(request)
-      return json(await saveFieldAnswer(db, user, id, data.field, data.value))
+      return json(await saveFieldAnswer(db, user, id, data.field, data.value, data.courseId))
     }
     if (id && action === 'upload' && ['screenshot', 'file'].includes(extra)) {
       if (method === 'GET') return downloadFile(env, user, id, extra, url.searchParams.get('preview') === '1')
