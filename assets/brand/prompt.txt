@@ -27,4 +27,3 @@ Make a single targeted cleanup: turn this into an immaculate two-color flat bran
 Keep the exact overall composition, the rounded-square tile, and the recognizable white Z/open-book silhouette, including its folds, spacing, position, and scale. Do not redesign the mark.
 Replace the entire purple tile interior with one perfectly uniform solid #633BCC color. Replace the white emblem interior with perfectly uniform pure white #FFFFFF. Remove every gradient, texture, dark stain, left-side smudge, halo, colored edge artifact, grain and shadow. Edges must be smooth, clean and crisply anti-aliased. Keep the space outside the rounded-square tile genuinely transparent, with no stray pixels or colored fringing.
 The final output must be just this one centered production-ready icon. No text, no lettering, no watermark, no mockup, no extra ornament.
-
