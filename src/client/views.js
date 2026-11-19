@@ -167,7 +167,8 @@ export function submission(stage, kind, prompt = '') {
       <a href="${uploaded}">${esc(current.filename)}</a></div>` : ''}
     ${allowed ? `<div class="upload-row"><label class="file-picker">${icon('upload', 18)}<span>选择${kind === 'screenshot' ? '截图' : '文件'}</span>
       <input type="file" name="upload" ${kind === 'screenshot' ? 'accept="image/png,image/jpeg,image/webp,image/gif"' : ''} required></label>
-      <span class="file-label subtle">最多 10 MB</span><button class="btn">${current ? '替换上传' : '提交上传'}</button></div>` : ''}
+      ${kind === 'screenshot' ? button('capture-screen', '截取屏幕', 'btn capture-screen', 'image') : ''}
+      <span class="file-label subtle">最多 10 MB</span><button class="btn upload-submit">${current ? '替换上传' : '提交上传'}</button></div>` : ''}
   </form>`
 }
 

@@ -3,6 +3,7 @@ import { adminPage, providerNames } from './admin.js'
 import { createViewCache } from './view-cache.js'
 import { createCourseAutosave } from './course-autosave.js'
 import { lessonBlocks, lessonPayload, quickBlock, quickLesson, updateBlock } from './quick-lesson.js'
+import { captureScreenshot } from './screen-capture.js'
 import { courseHistory, courseSharingForm, courseVersionPreview, editorChoices } from './collaboration.js'
 import { wishBoard, wishCoursePicker, wishCourses, wishDiscussion, wishForm, wishHeading, wishPage, wishPath } from './wishes.js'
 import { askMarker, hasSubmissionMarker, submissionKinds, submissionMarker, submissionSpecs } from './tutorial.js'
@@ -671,22 +672,36 @@ function applyStage(stage, kind, context) {
   if (context !== state.current) return
   context.stage = stage
   main.querySelector('[data-stage-stats]').innerHTML = stageStats(stage)
-  const slot = main.querySelector(`[data-submission="${kind}"]`)
-  if (slot) {
+  for (const slot of main.querySelectorAll(`[data-submission="${kind}"]`)) {
     const focused = slot.contains(document.activeElement)
     const prompt = slot.querySelector('.submit-prompt')?.textContent ?? ''
     slot.innerHTML = submission(stage, kind, prompt)
     if (focused) slot.querySelector('button:not(:disabled)')?.focus({ preventScroll: true })
   }
-  if (kind !== 'learned') {
-    main.querySelectorAll('[data-submission="learned"]').forEach(slot => { slot.innerHTML = submission(stage, 'learned') })
-  }
+  if (kind !== 'learned') renderLearned(stage)
   if (context.course) {
     const { course } = context
     syncCourseProgress(course, stage, joinedCourseId)
     syncStageRules(course, stage)
     main.querySelector('[data-outline]').innerHTML = progress(course) + outline(course, stage.id)
   }
+}
+
+function renderLearned(stage) {
+  for (const slot of main.querySelectorAll('[data-submission="learned"]')) {
+    const focused = slot.contains(document.activeElement)
+    slot.innerHTML = submission(stage, 'learned')
+    if (focused) slot.querySelector('button:not(:disabled)')?.focus({ preventScroll: true })
+  }
+}
+
+async function uploadStageFile(context, kind, file) {
+  if (context !== state.current || context.userId !== state.user?.id) throw new Error('页面或登录账号已切换，请重新提交。')
+  if (!file?.size || file.size > 10 * 1024 * 1024) throw new Error('请选择一个不超过 10 MB 的非空文件。')
+  const query = new URLSearchParams({ filename: file.name })
+  if (context.course) query.set('courseId', context.course.id)
+  const saved = await api('stages/' + key(context.stage.id) + '/upload/' + kind + '?' + query, { method: 'PUT', file })
+  applyStage(saved, kind, context)
 }
 
 async function filterWishes(status, page) {
@@ -1025,12 +1040,33 @@ async function handleAction(control) {
     case 'learned': {
       if (!requireLogin()) break
       const context = state.current
+      if (context.pendingLearned) break
       const { stage, course } = context
-      const saved = await api('stages/' + key(stage.id) + '/learned', {
-        method: 'PUT', body: { learned: !stage.learned, courseId: course?.id },
+      context.pendingLearned = true
+      main.querySelectorAll('[data-action="learned"]').forEach(button => { button.disabled = true })
+      try {
+        const saved = await api('stages/' + key(stage.id) + '/learned', {
+          method: 'PUT', body: { learned: !stage.learned, courseId: course?.id },
+        })
+        applyStage(saved, 'learned', context)
+        announce(saved.learned ? '已标记学会。其他课程中的同一关卡已同步。' : '已撤销学会状态。')
+      } finally {
+        context.pendingLearned = false
+        if (context === state.current) renderLearned(context.stage)
+      }
+      break
+    }
+    case 'capture-screen': {
+      if (!requireLogin()) break
+      const context = state.current
+      await captureScreenshot({
+        dialog, showDialog,
+        isCurrent: () => context === state.current && context.userId === state.user?.id,
+        async upload(file) {
+          await uploadStageFile(context, 'screenshot', file)
+          announce('截图已上传。')
+        },
       })
-      applyStage(saved, 'learned', context)
-      announce(saved.learned ? '已标记学会。其他课程中的同一关卡已同步。' : '已撤销学会状态。')
       break
     }
     case 'new-stage': {
@@ -1354,11 +1390,7 @@ async function handleForm(form) {
         const saved = await api(base + '/answer', { method: 'PUT', body: { answer: body.answer, courseId: course?.id } })
         applyStage(saved, 'answer', context)
       } else {
-        if (!body.upload.size || body.upload.size > 10 * 1024 * 1024) throw new Error('请选择一个不超过 10 MB 的非空文件。')
-        const query = new URLSearchParams({ filename: body.upload.name })
-        if (course) query.set('courseId', course.id)
-        const saved = await api(base + '/upload/' + form.dataset.kind + '?' + query, { method: 'PUT', file: body.upload })
-        applyStage(saved, form.dataset.kind, context)
+        await uploadStageFile(context, form.dataset.kind, body.upload)
       }
       announce('提交已保存。')
       break

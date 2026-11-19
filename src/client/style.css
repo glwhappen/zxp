@@ -249,7 +249,8 @@ code { background: #f2edf8; border-radius: 4px; padding: 1px 4px; overflow-wrap:
 .file-picker input { width: 100%; height: 100%; position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .file-picker:focus-within { outline: 2px solid var(--accent); outline-offset: 3px; }
 .file-label { overflow-wrap: anywhere; max-width: 100%; }
-.upload-row .btn { margin-left: auto; }
+.upload-row .upload-submit { margin-left: auto; }
+.upload-row .capture-screen { margin-left: 0; }
 .stage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .library-stage { display: flex; align-items: start; gap: 11px; border: 1px solid var(--line); border-radius: 13px; padding: 15px; background: white; text-align: left; }
 .library-stage:hover { border-color: #cdb9f1; }
@@ -270,6 +271,12 @@ form label:not(.file-picker), .dialog-body > label { display: grid; gap: 6px; co
 .form-error { border-radius: 8px; padding: 9px 10px; background: #fff1f2; color: #942941; font-size: 13px; }
 dialog { padding: 0; max-width: min(480px, calc(100vw - 24px)); width: 100%; border: 1px solid var(--line); border-radius: var(--radius); background: white; color: #201a31; box-shadow: 0 24px 80px #20133535; }
 dialog.dialog-wide { max-width: min(630px, calc(100vw - 24px)); }
+dialog.dialog-capture { max-width: min(1060px, calc(100vw - 24px)); }
+.capture-stage { display: flex; justify-content: center; padding: 10px; border-radius: 10px; background: #efedf4; overflow: hidden; }
+.capture-surface { display: inline-block; position: relative; flex-shrink: 0; overflow: hidden; touch-action: none; cursor: crosshair; }
+.capture-surface canvas { display: block; }
+.capture-selection { position: absolute; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px #1b142870; pointer-events: none; }
+.capture-actions { gap: 10px; justify-content: flex-end; }
 dialog::backdrop { background: #24153970; backdrop-filter: blur(3px); }
 dialog[open] { display: flex; flex-direction: column; max-height: calc(100dvh - 28px); }
 .dialog-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--line); flex: none; }
