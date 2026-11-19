@@ -227,11 +227,18 @@ function tutorialPanel(stage, signedIn) {
     ${blocks.some(block => block.kind) ? '<p class="subtle submission-intro">看到提交框就可以填写，也可以之后回来修改。</p>' : ''}
     ${content}
   </section>`
-    + (kinds.length ? `<section class="lesson-panel lesson-finish">
-      <div><h2>${icon('check', 20)} 学完这一关了吗？</h2>
-        <p class="subtle">完成必填提交后，点右边的按钮记录学习进度。</p></div>
-      <div data-submission="learned">${submission(stage, 'learned')}</div>
-    </section>` : '')
+}
+
+// 「标记学会了」在教程末尾再放一次：learned 是每个关卡都有的方式，不依赖有没有作业提交。
+function finishPanel(stage) {
+  const hint = stage.required?.length
+    ? '完成必填提交后，点右边的按钮记录学习进度。'
+    : '点右边的按钮记录学习进度，之后随时可以回来撤销。'
+  return `<section class="lesson-panel lesson-finish">
+    <div><h2>${icon('check', 20)} 学完这一关了吗？</h2>
+      <p class="subtle">${hint}</p></div>
+    <div data-submission="learned">${submission(stage, 'learned')}</div>
+  </section>`
 }
 
 // 关卡底部的笔记/讨论：笔记可选公开或私有，公开的其他人可以回复。
@@ -295,6 +302,7 @@ export function stagePage(stage, course, entry, signedIn) {
         </header>
         <section class="task-box"><h2>${icon('target', 20)} 学习任务</h2><p>${esc(stage.task)}</p></section>
         ${tutorialPanel(stage, signedIn)}
+        ${finishPanel(stage)}
       </article>`
   return `<p class="breadcrumb">${course ? link(coursePath(course.id), esc(course.title), 'back', 'left') : link('/stages', '我的关卡', 'back', 'left')}</p>
     <div class="learning-layout ${course ? '' : 'standalone'}">
