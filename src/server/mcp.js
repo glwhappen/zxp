@@ -17,7 +17,12 @@ import { prerequisiteModes } from './prerequisites.js'
 
 const version = '2026-07-28'
 const legacy = ['2025-11-25', '2025-06-18', '2025-03-26']
-const info = { name: 'zxp', version: '0.1.0' }
+const info = { name: 'zxp', title: '知行谱', version: '0.1.0' }
+const instructions = [
+  '知行谱（ZXP）是课程学习平台：作者用「关卡」编排实战教程，学习者在教程步骤里提交答案、截图或文件。',
+  '工具分三组：course_* 课程（列表/详情/创建/更新/加入/协作权限/历史版本与恢复）、stage_* 关卡与学习（读取关卡、提交答案或文件、标记学会）、wish_* 课程许愿池（发布、回复、给许愿推荐课程）。',
+  '新建课程默认私有，设为 public 才对外可见；课程改动会留历史版本，可用 course_restore 恢复。',
+].join('\n')
 const capabilities = { tools: {} }
 const cacheHints = { ttlMs: 0, cacheScope: 'public' }
 const string = { type: 'string' }
@@ -183,7 +188,7 @@ export async function handleMcp(request, env) {
       return success({ supportedVersions: [version, ...legacy], capabilities, ...cacheHints })
     case 'initialize':
       return success({ protocolVersion: legacy.includes(rpc.params?.protocolVersion) ? rpc.params.protocolVersion : legacy[0],
-        serverInfo: info, capabilities })
+        serverInfo: info, capabilities, instructions })
     case 'ping':
       return success({})
     case 'tools/list':

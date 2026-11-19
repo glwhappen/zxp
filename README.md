@@ -145,6 +145,8 @@ Sites 的私人访问限制在应用登录页面前生效。要让其他人在�
 | **托管站点** | 在 ChatGPT 或 Codex 中连接 Sites 发布时生成的个人插件。助手以连接账号访问课程与关卡，新课程可在网页的「我的创作」查看。 |
 | **本地开发** | 登录后在「MCP 连接」点「生成令牌并复制配置」，会得到一份已带 `Authorization: Bearer <令牌>` 的客户端配置（也带 Claude Code 的 `claude mcp add` 命令），粘进去就能连。服务端是无状态 Streamable HTTP 端点 `/mcp`，轮换令牌后旧配置立即失效。 |
 
+服务端会自描述：`initialize` 返回 `serverInfo.title`（知行谱）和 `instructions`（三组工具分工、新建课程默认私有、可用历史版本恢复），客户端没另外配说明时也能知道连上的是什么。
+
 ### 创建一门引用现有关卡的课程
 
 `stageIds` 决定关卡顺序，可以填写 `stage_list` 返回的自有 ID，或填写同一次请求里 `newStages` 中定义的 `clientId`。`requires` 用「关卡 ID → 前置关卡 ID 数组」描述关卡依赖，`required` 列出必须先提交的提交方式，`prerequisites` 描述课程前置，`labels` 可设 `draft`（编写中）、`done`（完结）、`co-create`（期待共创）——`featured`（精品）只能管理员在后台设置。
