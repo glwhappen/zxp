@@ -27,13 +27,23 @@ export function prerequisiteQuery(db, user, courseId) {
     pending AS (
       SELECT DISTINCT links.root FROM links JOIN courses c ON c.id = links.target
       WHERE NOT ${readableCourse('?1')} OR EXISTS (
-        SELECT 1 FROM course_stages cs
-        WHERE cs.course_id = c.id AND NOT EXISTS (
+        SELECT 1 FROM course_stages cs JOIN stages s ON s.id = cs.stage_id
+        LEFT JOIN course_stage_content l ON l.course_id = cs.course_id AND l.stage_id = cs.stage_id
+        WHERE cs.course_id = c.id AND (NOT EXISTS (
           SELECT 1 FROM progress p WHERE p.stage_id = cs.stage_id AND p.user_id = ?1
-        )
+        ) OR EXISTS (
+          SELECT 1 FROM json_each(COALESCE(l.required, s.required)) r WHERE NOT EXISTS (
+            SELECT 1 FROM submissions sub WHERE sub.stage_id = s.id AND sub.user_id = ?1 AND sub.kind = r.value
+          )
+        ) OR EXISTS (
+          SELECT 1 FROM json_each(COALESCE(l.required_fields, '[]')) r WHERE NOT EXISTS (
+            SELECT 1 FROM stage_answers a WHERE a.stage_id = s.id AND a.user_id = ?1 AND a.field = r.value AND trim(a.value) <> ''
+          )
+        ))
       )
     )
     SELECT r.prerequisite_id AS courseId, r.mode,
+      CASE WHEN ${readableCourse('?1')} THEN c.alias END AS alias,
       CASE WHEN ${readableCourse('?1')} THEN c.title END AS title,
       CASE WHEN ${readableCourse('?1')} THEN c.visibility END AS visibility,
       p.root IS NULL AS completed
@@ -49,7 +59,7 @@ export function lockedByPrerequisites(items) {
 
 export async function prerequisiteChoices(db, user, courseId) {
   return rows(statement(db, `
-    SELECT c.id, c.title, c.visibility FROM courses c
+    SELECT c.id, c.alias, c.title, c.visibility FROM courses c
     WHERE c.id <> ?2 AND (${publicCourse} OR c.owner_id = ?1)
     ORDER BY c.owner_id <> ?1, c.title, c.id
   `, user.id, courseId ?? ''))

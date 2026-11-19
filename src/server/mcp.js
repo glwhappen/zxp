@@ -1,6 +1,7 @@
+import { AUTHOR_LABELS, KINDS, METHODS } from '../shared.js'
 import { checkOrigin, choice, field, json, objectBody, RequestError } from './core.js'
 import {
-  CATEGORIES, courseDetail, courseOverview, joinCourse, listCourses, listStages, markLearned, METHODS,
+  CATEGORIES, courseDetail, courseOverview, joinCourse, listCourses, listStages, markLearned,
   saveCourse, saveStage, studyStageDetail, THEMES,
 } from './learning.js'
 import { submitAnswer, submitFile } from './submissions.js'
@@ -27,18 +28,23 @@ const visibility = enumeration(['public', 'private'])
 const expectedRevision = { type: 'number', minimum: 0 }
 const pageNumber = { type: 'number', minimum: 1 }
 const course = {
-  title: string, description: string, category: enumeration(CATEGORIES), theme: enumeration(THEMES),
+  title: string, alias: { ...string, description: '可选且唯一的课程短链接别名。留空清除，省略则保留。' },
+  description: string, category: enumeration(CATEGORIES), theme: enumeration(THEMES),
   visibility, stageIds: array(string),
   prerequisites: array({
     type: 'object', properties: { courseId: string, mode: enumeration(prerequisiteModes) },
     required: ['courseId', 'mode'], additionalProperties: false,
   }),
+  requires: { type: 'object', additionalProperties: array(string),
+    description: '关卡依赖：{ 关卡 ID: [前置关卡 ID...] }。前置关卡必须排在当前关卡之前，全部学会后才能打开当前关卡。' },
+  labels: { ...array(enumeration(AUTHOR_LABELS)), description: '课程标签：draft 编写中、done 完结、co-create 期待共创。featured（精品）只能由管理员在后台设置。' },
 }
 const stage = {
   title: string,
   task: string,
-  tutorial: { ...string, description: 'Markdown 教程。将 {{submit:answer}}、{{submit:screenshot}} 或 {{submit:file}} 放在独立段落中，安排已开启的提交框。' },
+  tutorial: { ...string, description: 'Markdown 教程。开启的每种提交方式都必须在独立段落里占位，并写清要交什么：{{submit:answer|写下 3 个候选和理由}}（screenshot/file 同理），缺少标记或说明会保存失败；{{ask:问题}} 或 {{ask:问题|选项1,选项2}} 在步骤里放一个小提问。' },
   methods: array(enumeration(METHODS)),
+  required: { ...array(enumeration(KINDS)), description: '必填的提交方式，必须是 methods 中已开启的项。必填未提交时无法标记学会。' },
   visibility,
 }
 const id = (args, key) => field(args[key], key, 100)
@@ -60,10 +66,10 @@ tool('course_list', '列出公开、自己创建、可以管理或已经加入�
   ({ DB }, user, args) => listCourses(DB, user, args.scope), true)
 tool('course_get', '读取课程详情、关卡顺序和当前用户的学习进度。', { courseId: string }, ['courseId'],
   async ({ DB }, user, args) => courseOverview(await courseDetail(DB, user, id(args, 'courseId'))), true)
-tool('course_create', '创建课程。stageIds 只能引用自己的关卡，也可引用 newStages 里同次创建的新关卡标记。默认私有。', {
+tool('course_create', '创建课程。stageIds 只能引用自己的关卡，也可用 newStages 在同一次调用里创建新关卡；prerequisites 是课程前置，requires 是关卡依赖。默认私有。', {
   ...course,
   newStages: array({
-    type: 'object', properties: { clientId: string, ...stage }, required: ['clientId', 'title', 'task'],
+    type: 'object', properties: { clientId: string, ...stage, alias: string }, required: ['clientId', 'title', 'task'],
     additionalProperties: false,
   }),
 }, ['title'],
@@ -91,11 +97,15 @@ tool('course_restore', '将课程资料、关卡编排和讲义恢复到历史�
 }, ['courseId', 'versionId', 'expectedRevision'],
 ({ DB }, user, args) => restoreCourseVersion(DB, user, id(args, 'courseId'), id(args, 'versionId'), args))
 tool('course_lesson_update', '更新本课程里的关卡名称、任务和讲义。', {
-  courseId: string, stageId: string, title: string, task: string, tutorial: stage.tutorial, expectedRevision, checkpoint: boolean,
+  courseId: string, stageId: string, title: string, task: string, tutorial: stage.tutorial,
+  alias: { ...string, description: '当前课程内唯一的步骤别名。留空清除，省略保留。' },
+  methods: stage.methods, required: stage.required, requiredFields: array(string), expectedRevision, checkpoint: boolean,
 }, ['courseId', 'stageId', 'title', 'task', 'tutorial', 'expectedRevision'],
 ({ DB }, user, args) => saveCourseLesson(DB, user, id(args, 'courseId'), id(args, 'stageId'), args))
-tool('course_stage_create', '在可编辑课程末尾创建关卡。新关卡使用课程的可见性。', {
-  courseId: string, title: stage.title, task: stage.task, tutorial: stage.tutorial, methods: stage.methods, expectedRevision,
+tool('course_stage_create', '在可编辑课程末尾创建关卡。新关卡使用课程的可见性，可用 required 设定必填提交。', {
+  courseId: string, title: stage.title, task: stage.task, tutorial: stage.tutorial, methods: stage.methods,
+  alias: { ...string, description: '可选步骤别名，同一课程内唯一。' },
+  required: stage.required, expectedRevision,
 }, ['courseId', 'title', 'task', 'expectedRevision'], ({ DB }, user, args) => addCourseStage(DB, user, id(args, 'courseId'), args))
 tool('stage_list', '列出自己创建、可在自己其他课程复用的关卡。', { scope: enumeration(['available', 'owned']) }, [],
   ({ DB }, user, args) => listStages(DB, user, args.scope), true)

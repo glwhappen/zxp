@@ -72,7 +72,7 @@ export function wishDiscussion(wish) {
 
 export function wishCourses(wish) {
   return wish.courses.length ? `<ul class="wish-course-list">${wish.courses.map(course => `<li>
-    <a data-link href="${coursePath(course.id)}"><span class="step-text"><strong>${esc(course.title)}</strong>
+    <a data-link href="${coursePath(course)}"><span class="step-text"><strong>${esc(course.title)}</strong>
       <small>${esc(course.category)} · ${esc(course.linkedBy)} 推荐</small></span>${icon('arrow', 16)}</a>
     ${wish.mine ? `<div class="wish-reactions" role="group" aria-label="${esc(course.title)} 的反馈">
       ${[['up', '点赞'], ['down', '点踩']].map(([reaction, label]) =>

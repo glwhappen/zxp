@@ -1,12 +1,18 @@
 import page from '../client/index.html'
 import css from '../client/style.css'
 import client from 'client-bundle'
+import qrCodePanlama from './qr-panlama.webp'
+import brandLogo from '../../assets/brand/logo.webp'
+import favicon from '../../assets/brand/favicon.png'
+import touchIcon from '../../assets/brand/apple-touch-icon.png'
 import { authenticate, identify, manageToken } from './auth.js'
 import { checkOrigin, fail, json, objectBody, readBytes, RequestError, requireUser } from './core.js'
 import { seedExamples } from './examples.js'
 import {
-  courseDetail, courseOverview, joinCourse, listCourses, listStages, markLearned, ownedStage, saveCourse, saveStage, studyStageDetail,
+  courseDetail, courseOverview, joinCourse, listCourses, listStages, markLearned, ownedStage,
+  saveCourse, saveFieldAnswer, saveStage, studyStageDetail,
 } from './learning.js'
+import { createNote, deleteNote, listNotes, updateNote } from './notes.js'
 import { downloadFile, FILE_LIMIT, submitAnswer, submitFile } from './submissions.js'
 import { handleMcp } from './mcp.js'
 import { adminApi } from './admin.js'
@@ -15,6 +21,7 @@ import { beginOidc, finishOidc } from './oidc.js'
 import { profileFor, readView } from './views.js'
 import { wishApi } from './wishes.js'
 import { collaborationApi } from './collaboration.js'
+import { resolveCourseId, resolveCourseStageId } from './course-access.js'
 
 const scriptPath = `/assets/app.${CLIENT_DIGEST}.js`
 const stylePath = `/assets/style.${CSS_DIGEST}.css`
@@ -22,6 +29,10 @@ const renderedPage = page.replace('/app.js', scriptPath).replace('/style.css', s
 const assets = new Map([
   [scriptPath, [client, 'text/javascript; charset=utf-8']],
   [stylePath, [css, 'text/css; charset=utf-8']],
+  ['/assets/qr-panlama.webp', [qrCodePanlama, 'image/webp']],
+  ['/assets/logo-v2.webp', [brandLogo, 'image/webp']],
+  ['/assets/favicon-v2.png', [favicon, 'image/png']],
+  ['/assets/apple-touch-icon-v2.png', [touchIcon, 'image/png']],
 ])
 const security = {
   'Content-Security-Policy': "default-src 'self'; img-src 'self' https: data:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'",
@@ -33,7 +44,8 @@ async function api(request, env, url) {
   const db = env.DB
   const method = request.method
   if (method !== 'GET') checkOrigin(request)
-  const [, , resource, id, action, extra] = url.pathname.split('/')
+  const [, , resource, identifier, action, extra] = url.pathname.split('/')
+  let id = identifier
   const settings = await getLoginSettings(env)
   if (resource === 'auth' && method === 'POST' && ['register', 'login', 'logout'].includes(id)) {
     return authenticate(request, env, id, settings)
@@ -53,7 +65,11 @@ async function api(request, env, url) {
   if (resource === 'admin') return adminApi(request, env, user, settings, url)
   if (resource === 'wishes') return wishApi(request, db, user, url)
   if (resource === 'courses') {
-    if (id && ['sharing', 'versions', 'stages'].includes(action)) return collaborationApi(request, db, user, url, id, action, extra)
+    if (id) id = await resolveCourseId(db, id)
+    if (id && ['sharing', 'versions', 'stages'].includes(action)) {
+      const resource = action === 'stages' && extra ? await resolveCourseStageId(db, id, extra) : extra
+      return collaborationApi(request, db, user, url, id, action, resource)
+    }
     if (method === 'GET') {
       return json(id ? courseOverview(await courseDetail(db, user, id)) : await listCourses(db, user, url.searchParams.get('scope') ?? 'public'))
     }
@@ -79,6 +95,25 @@ async function api(request, env, url) {
       const result = action === 'learned' ? await markLearned(db, user, id, data.learned, data.courseId)
         : await submitAnswer(db, user, id, data.answer, data.courseId)
       return json(result)
+    }
+    if (id && action === 'notes') {
+      if (method === 'GET') return json(await listNotes(db, user, id))
+      if (method === 'POST') {
+        requireUser(user)
+        return json(await createNote(db, user, id, await objectBody(request)), 201)
+      }
+      if ((method === 'PUT' || method === 'DELETE') && extra) {
+        requireUser(user)
+        const body = method === 'PUT' ? await objectBody(request) : {}
+        const result = method === 'PUT' ? await updateNote(db, user, id, extra, body)
+          : await deleteNote(db, user, id, extra)
+        return json(result)
+      }
+    }
+    if (id && action === 'field' && method === 'PUT') {
+      requireUser(user)
+      const data = await objectBody(request)
+      return json(await saveFieldAnswer(db, user, id, data.field, data.value, data.courseId))
     }
     if (id && action === 'upload' && ['screenshot', 'file'].includes(extra)) {
       if (method === 'GET') return downloadFile(env, user, id, extra, url.searchParams.get('preview') === '1')

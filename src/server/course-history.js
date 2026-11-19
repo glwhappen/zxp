@@ -15,8 +15,9 @@ export function checkpoint(db, courseId, revision, actor, reason, { periodic = f
       ))
     `, versionId, courseId, revision, actor, reason, Number(periodic)),
     statement(db, `
-      INSERT INTO course_version_stages (version_id, stage_id, position, title, task, tutorial)
-      SELECT ?1, cs.stage_id, cs.position, COALESCE(l.title, s.title), COALESCE(l.task, s.task), COALESCE(l.tutorial, s.tutorial)
+      INSERT INTO course_version_stages (version_id, stage_id, position, title, task, tutorial, methods, required, required_fields, requires, alias)
+      SELECT ?1, cs.stage_id, cs.position, COALESCE(l.title, s.title), COALESCE(l.task, s.task), COALESCE(l.tutorial, s.tutorial),
+        COALESCE(l.methods, s.methods), COALESCE(l.required, s.required), COALESCE(l.required_fields, '[]'), cs.requires, cs.alias
       FROM course_stages cs JOIN stages s ON s.id = cs.stage_id
       LEFT JOIN course_stage_content l ON l.course_id = cs.course_id AND l.stage_id = cs.stage_id
       WHERE cs.course_id = ?2 AND EXISTS (SELECT 1 FROM course_versions WHERE id = ?1)

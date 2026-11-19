@@ -1,71 +1,87 @@
 import { marked } from 'marked'
 
 export const submissionKinds = ['answer', 'screenshot', 'file']
-export const submissionMarker = kind => `{{submit:${kind}}}`
+// 提交框必须带说明：{{submit:answer|这一题要交什么}}；不写说明的旧写法只读兼容。
+export const submissionMarker = (kind, prompt = '') =>
+  prompt ? `{{submit:${kind}|${prompt}}}` : `{{submit:${kind}}}`
+export const askMarker = (question, options = []) =>
+  `{{ask:${question}${options.length ? '|' + options.join(',') : ''}}}`
 
-function markerKind(token) {
+function markerSpec(token) {
   if (token.type !== 'paragraph') return
-  return /^\{\{submit:(answer|screenshot|file)\}\}$/.exec(token.raw.trim())?.[1]
+  const match = /^\{\{submit:(answer|screenshot|file)(?:\|([^\n}]+))?\}\}$/.exec(token.raw.trim())
+  if (!match) return
+  return { kind: match[1], prompt: (match[2] ?? '').trim().slice(0, 300) }
+}
+
+export function submissionSpecs(markdown) {
+  return marked.lexer(markdown).map(markerSpec).filter(Boolean)
+}
+
+// {{ask:问题}} 是文本框；{{ask:问题|选项1,选项2}} 是单选，前端自动补「其他」。
+export function askField(token) {
+  if (token.type !== 'paragraph') return
+  const match = /^\{\{ask:(.+?)\}\}$/.exec(token.raw.trim())
+  if (!match) return
+  const [rawName, rawOptions = '', rawKey] = match[1].split('|')
+  const name = rawName.trim()
+  if (!name || name.length > 60 || /[\n{}]/.test(name)) return
+  const options = rawOptions.split(/[,，]/).map(value => value.trim()).filter(Boolean)
+  if (options.length > 12) return
+  if (rawKey !== undefined && (!rawKey.startsWith('key=') || !rawKey.slice(4).trim()
+    || rawKey.slice(4).length > 60 || /[\n{}]/.test(rawKey))) return
+  return { name, options, ...(rawKey === undefined ? {} : { key: rawKey.slice(4).trim() }) }
+}
+
+export function tutorialFields(markdown) {
+  return marked.lexer(markdown).map(askField).filter(Boolean)
+}
+
+export function tutorialTokens(markdown) {
+  return marked.lexer(markdown).map(token => ({
+    raw: token.raw, type: token.type, field: askField(token), submission: markerSpec(token),
+  }))
 }
 
 export function hasSubmissionMarker(markdown, kind) {
-  return marked.lexer(markdown).some(token => markerKind(token) === kind)
+  return marked.lexer(markdown).some(token => markerSpec(token)?.kind === kind)
 }
 
-function sectionEndIndexes(tokens) {
-  const ends = []
-  let hasContent = false
-  tokens.forEach((token, index) => {
-    if (token.type === 'heading') {
-      if (hasContent) ends.push(index)
-      hasContent = false
-    } else if (token.type !== 'space') {
-      hasContent = true
-    }
-  })
-  if (!ends.length) {
-    tokens.forEach((token, index) => {
-      if (token.type === 'paragraph' && index + 1 < tokens.length) ends.push(index + 1)
-    })
-  }
-  return [...ends, tokens.length]
+export function hasAskMarker(markdown, name) {
+  return tutorialFields(markdown).some(field => (field.key ?? field.name) === name)
 }
 
 export function layoutTutorial(markdown, kinds) {
   const tokens = marked.lexer(markdown)
-  const markers = tokens.map(markerKind)
-  const explicit = markers.some(Boolean)
-  const ends = explicit ? [] : sectionEndIndexes(tokens)
-  const scheduled = new Map()
-  if (!explicit) {
-    kinds.forEach((kind, index) => {
-      const boundary = kinds.length === 1 ? Math.floor((ends.length - 1) / 2)
-        : Math.floor((index + 1) * ends.length / (kinds.length + 1))
-      const end = ends[boundary]
-      scheduled.set(end, [...(scheduled.get(end) ?? []), kind])
-    })
-  }
+  const markers = tokens.map(token => {
+    const spec = markerSpec(token)
+    if (spec) return spec
+    const field = askField(token)
+    return field ? { field } : null
+  })
 
   const blocks = []
   const remaining = new Set(kinds)
   let start = 0
-  function addSubmissions(end, slots) {
+  function addSlots(end, slots) {
     const html = marked.parser(tokens.slice(start, end))
     if (html.trim()) blocks.push({ html })
-    for (const kind of slots) {
-      if (remaining.delete(kind)) blocks.push({ kind })
+    for (const slot of slots) {
+      if (slot.field) {
+        blocks.push(slot)
+        continue
+      }
+      const kind = slot.kind ?? slot
+      if (remaining.delete(kind)) blocks.push(slot.kind ? slot : { kind })
     }
   }
 
+  // 只有作者手动插入的 {{submit:...}} 才会出现在教程中间；其余提交框一律放到末尾的「交作业」。
   for (let index = 0; index < tokens.length; index++) {
-    if (markers[index]) {
-      addSubmissions(index, [markers[index]])
-      start = index + 1
-    } else if (scheduled.has(index)) {
-      addSubmissions(index, scheduled.get(index))
-      start = index
-    }
+    if (!markers[index]) continue
+    addSlots(index, [markers[index]])
+    start = index + 1
   }
-  addSubmissions(tokens.length, scheduled.get(tokens.length) ?? [])
+  addSlots(tokens.length, [])
   return { blocks, remaining: [...remaining] }
 }
