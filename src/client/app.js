@@ -662,10 +662,13 @@ function applyStage(stage, kind, context) {
   const joinedCourseId = kind !== 'learned' || stage.learned ? context.course?.id : null
   const changesEnrollment = joinedCourseId && !context.course.joined
   views.invalidate((path, view) => (view.type === 'shelf' && (view.scope === 'joined' || changesEnrollment))
-    || (changesEnrollment && view.type === 'explore') || (kind === 'learned' && view.course?.prerequisites?.length > 0))
+    || (changesEnrollment && view.type === 'explore') || (kind === 'learned' && view.course?.prerequisites?.length > 0)
+    || (view.course?.id !== context.course?.id
+      && (view.stage?.id === stage.id || view.course?.stages.some(item => item.id === stage.id))))
   views.update(view => {
     if (view.stage?.id === stage.id) view.stage = { ...view.stage,
-      learned: stage.learned, submissions: stage.submissions, stats: stage.stats }
+      learned: stage.learned, submissions: stage.submissions, stats: stage.stats,
+      missing: stage.missing, missingFields: stage.missingFields, answers: stage.answers }
     syncCourseProgress(view.course, stage, joinedCourseId)
     syncStageRules(view.course, stage)
   })
