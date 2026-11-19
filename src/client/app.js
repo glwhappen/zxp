@@ -438,7 +438,8 @@ async function saveAskField(record) {
   if (state.quick || context !== state.current || context.userId !== state.user?.id) return
   record.running = true
   try {
-    while (record.savedVersion !== record.version && context === state.current && !state.quick) {
+    while (record.savedVersion !== record.version && context === state.current
+      && context.userId === state.user?.id && !state.quick) {
       const version = record.version
       const stageId = context.stage.id
       await api('stages/' + key(stageId) + '/field', {
