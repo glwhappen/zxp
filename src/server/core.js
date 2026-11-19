@@ -1,12 +1,13 @@
 export class RequestError extends Error {
-  constructor(status, message) {
+  constructor(status, message, details) {
     super(message)
     this.status = status
+    this.details = details
   }
 }
 
-export function fail(status, message) {
-  throw new RequestError(status, message)
+export function fail(status, message, details) {
+  throw new RequestError(status, message, details)
 }
 
 export function json(data, status = 200, headers = {}) {

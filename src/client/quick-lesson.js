@@ -1,19 +1,20 @@
 import { marked } from 'marked'
-import { tutorialTokens, submissionMarker } from './tutorial.js'
-import { button, esc, markdownBlock, methods } from './views.js'
+import { tutorialTokens, submissionMarker, widgetMarker } from './tutorial.js'
+import { button, esc, lessonWidget, markdownBlock, methods, renderLessonMarkdown } from './views.js'
 import { icon } from './icons.js'
 
 export function lessonBlocks(tutorial) {
   const blocks = []
   for (const token of tutorialTokens(tutorial)) {
     if (blocks.length && (token.type === 'space'
-      || (!token.field && !token.submission && blocks.at(-1).type === 'text'))) {
+      || (!token.field && !token.submission && !token.widget && blocks.at(-1).type === 'text'))) {
       blocks.at(-1).raw += token.raw
       continue
     }
     blocks.push({
       id: crypto.randomUUID(), raw: token.raw,
-      type: token.field ? 'question' : token.submission ? token.submission.kind : 'text',
+      type: token.widget?.type ?? (token.field ? 'question' : token.submission ? token.submission.kind : 'text'),
+      title: token.widget?.title, content: token.widget?.content,
       fieldKey: token.field?.key ?? token.field?.name,
       name: token.field?.name, options: token.field?.options ?? [],
       prompt: token.submission?.prompt,
@@ -67,6 +68,11 @@ export function lessonPayload(editor) {
 
 export function updateBlock(block, control) {
   const property = control.dataset.quickProperty
+  if (['prompt', 'details'].includes(block.type)) {
+    block[property] = control.value
+    block.raw = widgetMarker(block.type, block.title, block.content) + '\n\n'
+    return
+  }
   if (property === 'text') block.raw = control.value.replace(/\s+$/, '') + '\n\n'
   else {
     block[property] = property === 'options' ? control.value.split(/[,，]/).map(item => item.trim()).filter(Boolean) : control.value
@@ -86,7 +92,7 @@ export function quickBlock(block, editor, index) {
   const insert = `<div class="quick-insert">
     ${button('quick-insert-menu', '在下方插入', 'quick-insert-trigger', 'plus', attributes)}
     <div class="quick-insert-menu" hidden>
-      ${[['text', '文字'], ['question', '提问'], ['answer', '答案框'], ['screenshot', '截图'], ['file', '文件']].map(([type, name]) =>
+      ${[['text', '文字'], ['prompt', '提示词'], ['details', '折叠说明'], ['question', '提问'], ['answer', '答案框'], ['screenshot', '截图'], ['file', '文件']].map(([type, name]) =>
         button('quick-add', name, 'btn', null, `data-after="${block.id}" data-type="${type}"`)).join('')}
     </div></div>`
   if (block.type === 'text') {
@@ -99,6 +105,16 @@ export function quickBlock(block, editor, index) {
         ${markdownBlock(html)}
       </div>
       <div class="quick-text-input" data-rich-mount hidden></div>${insert}</section>`
+  }
+  if (['prompt', 'details'].includes(block.type)) {
+    const prompt = block.type === 'prompt'
+    return `<section class="quick-block quick-widget" data-quick-block="${block.id}">
+      <div class="section-head"><h3>${icon(prompt ? 'spark' : 'chevron', 18)} ${prompt ? '提示词' : '折叠说明'}</h3>${controls}</div>
+      <label>${prompt ? '提示词标题' : '折叠标题'}<input data-quick-property="title" aria-label="${prompt ? '提示词标题' : '折叠标题'}" maxlength="100" value="${esc(block.title)}" placeholder="${prompt ? '例如：生成三镜头分镜' : '例如：可选的补充说明'}"></label>
+      ${prompt ? `<label>提示词内容<textarea data-quick-property="content" aria-label="提示词内容" rows="7" maxlength="35000" placeholder="在这里填写可以原样复制的提示词">${esc(block.content)}</textarea></label>`
+        : `<div class="quick-fold-content"><span class="subtle">折叠内容 · 点击编辑</span><div role="button" tabindex="0" class="quick-text-preview" data-action="quick-text" ${attributes} aria-label="编辑折叠内容">${renderLessonMarkdown(block.content) || '<p class="subtle">点击填写补充说明…</p>'}</div><div class="quick-text-input" data-rich-mount hidden></div></div>`}
+      <div class="quick-widget-preview" data-quick-widget-preview><small class="subtle">学习者预览</small>${lessonWidget(block)}</div>
+      ${insert}</section>`
   }
   const question = block.type === 'question'
   const required = question ? editor.requiredFields.includes(block.fieldKey) : editor.required.includes(block.type)
@@ -143,6 +159,7 @@ export function quickLesson(editor) {
   <div class="quick-add lesson-panel">
     <label>添加内容<select data-quick-type>
       <option value="text">文字段落</option><option value="question">步骤提问</option>
+      <option value="prompt">提示词</option><option value="details">折叠说明</option>
       ${['answer', 'screenshot', 'file'].map(kind => `<option value="${kind}">${methods[kind][0]}</option>`).join('')}
     </select></label>
     ${button('quick-add', '插入内容', 'btn', 'plus')}

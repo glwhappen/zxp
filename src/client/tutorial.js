@@ -7,6 +7,32 @@ export const submissionMarker = (kind, prompt = '') =>
 export const askMarker = (question, options = []) =>
   `{{ask:${question}${options.length ? '|' + options.join(',') : ''}}}`
 
+export function contentWidget(token) {
+  if (token.type !== 'code') return
+  const match = /^(prompt|details|fold)(?:\s+([^\n]*))?$/i.exec((token.lang ?? '').trim())
+  if (!match) return
+  return { type: match[1].toLowerCase() === 'prompt' ? 'prompt' : 'details', title: (match[2] ?? '').trim(), content: (token.text ?? '').replace(/\r?\n$/, '') }
+}
+
+export function fencedCode(info = '', content = '') {
+  const heading = info.replace(/[\r\n]+/g, ' ').trim()
+  const character = heading.includes('`') ? '~' : '`'
+  const runs = [...content.matchAll(new RegExp('^\\s*(' + character + '{3,})', 'gm'))].map(match => match[1].length)
+  const fence = character.repeat(Math.max(3, ...runs.map(length => length + 1)))
+  return fence + heading + '\n' + content + '\n' + fence
+}
+
+export function widgetMarker(type, title = '', content = '') {
+  return fencedCode(type + (title ? ' ' + title : ''), content)
+}
+
+export function readCodeToken(raw) {
+  const token = marked.lexer(raw)[0]
+  if (token?.type !== 'code') return
+  const fenced = /^ {0,3}(`{3,}|~{3,})/.test(raw)
+  return { language: token.lang || null, content: fenced ? (token.text ?? '').replace(/\r?\n$/, '') : token.text ?? '' }
+}
+
 function markerSpec(token) {
   if (token.type !== 'paragraph') return
   const match = /^\{\{submit:(answer|screenshot|file)(?:\|([^\n}]+))?\}\}$/.exec(token.raw.trim())
@@ -39,7 +65,7 @@ export function tutorialFields(markdown) {
 
 export function tutorialTokens(markdown) {
   return marked.lexer(markdown).map(token => ({
-    raw: token.raw, type: token.type, field: askField(token), submission: markerSpec(token),
+    raw: token.raw, type: token.type, field: askField(token), submission: markerSpec(token), widget: contentWidget(token),
   }))
 }
 
@@ -56,6 +82,8 @@ export function layoutTutorial(markdown, kinds) {
   const markers = tokens.map(token => {
     const spec = markerSpec(token)
     if (spec) return spec
+    const widget = contentWidget(token)
+    if (widget) return { widget }
     const field = askField(token)
     return field ? { field } : null
   })
@@ -67,6 +95,10 @@ export function layoutTutorial(markdown, kinds) {
     const html = marked.parser(tokens.slice(start, end))
     if (html.trim()) blocks.push({ html })
     for (const slot of slots) {
+      if (slot.widget) {
+        blocks.push(slot)
+        continue
+      }
       if (slot.field) {
         blocks.push(slot)
         continue
