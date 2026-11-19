@@ -1,6 +1,7 @@
 import page from '../client/index.html'
 import css from '../client/style.css'
 import client from 'client-bundle'
+import qrCodePanlama from './qr-panlama.webp'
 import { authenticate, identify, manageToken } from './auth.js'
 import { checkOrigin, fail, json, objectBody, readBytes, RequestError, requireUser } from './core.js'
 import { seedExamples } from './examples.js'
@@ -24,6 +25,7 @@ const renderedPage = page.replace('/app.js', scriptPath).replace('/style.css', s
 const assets = new Map([
   [scriptPath, [client, 'text/javascript; charset=utf-8']],
   [stylePath, [css, 'text/css; charset=utf-8']],
+  ['/assets/qr-panlama.webp', [qrCodePanlama, 'image/webp']],
 ])
 const security = {
   'Content-Security-Policy': "default-src 'self'; img-src 'self' https: data:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'",

@@ -24,7 +24,7 @@ export async function buildSite({ sites = false, outfile = 'dist/server/index.js
       CLIENT_DIGEST: JSON.stringify(digest(client.outputFiles[0].contents)),
       CSS_DIGEST: JSON.stringify(digest(await readFile('src/client/style.css'))),
     },
-    loader: { '.html': 'text', '.css': 'text' },
+    loader: { '.html': 'text', '.css': 'text', '.webp': 'binary' },
     plugins: [{
       name: 'client-bundle',
       setup(builder) {
