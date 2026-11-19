@@ -14,10 +14,16 @@ import {
   restoreCourseVersion, saveCourseLesson, saveCourseSharing, searchCourseEditors,
 } from './collaboration.js'
 import { prerequisiteModes } from './prerequisites.js'
+import { checkCourseAlias } from './course-aliases.js'
 
 const version = '2026-07-28'
 const legacy = ['2025-11-25', '2025-06-18', '2025-03-26']
-const info = { name: 'zxp', version: '0.1.0' }
+const info = { name: 'zxp', title: '知行谱', version: '0.1.0' }
+const instructions = [
+  '知行谱（ZXP）是课程学习平台：作者用「关卡」编排实战教程，学习者在教程步骤里提交答案、截图或文件。',
+  '工具分三组：course_* 课程（列表/详情/创建/更新/加入/协作权限/历史版本与恢复）、stage_* 关卡与学习（读取关卡、提交答案或文件、标记学会）、wish_* 课程许愿池（发布、回复、给许愿推荐课程）。',
+  '新建课程默认私有，设为 public 才对外可见；课程改动会留历史版本，可用 course_restore 恢复。',
+].join('\n')
 const capabilities = { tools: {} }
 const cacheHints = { ttlMs: 0, cacheScope: 'public' }
 const string = { type: 'string' }
@@ -42,13 +48,16 @@ const course = {
 const stage = {
   title: string,
   task: string,
-  tutorial: { ...string, description: 'Markdown 教程。开启的每种提交方式都必须在独立段落里占位，并写清要交什么：{{submit:answer|写下 3 个候选和理由}}（screenshot/file 同理），缺少标记或说明会保存失败；{{ask:问题}} 或 {{ask:问题|选项1,选项2}} 在步骤里放一个小提问。' },
+  tutorial: { ...string, description: 'Markdown 教程。开启的每种提交方式都必须在独立段落里占位，并写清要交什么：{{submit:answer|写下 3 个候选和理由}}（screenshot/file 同理），缺少标记或说明会保存失败；{{ask:问题}} 或 {{ask:问题|选项1,选项2}} 在步骤里放一个小提问。使用 prompt 语言的围栏代码块展示可一键复制的提示词，details 语言的围栏代码块展示默认收起的 Markdown 补充说明；语言名后可加标题。内容含围栏时，外层使用更多反引号。' },
   methods: array(enumeration(METHODS)),
   required: { ...array(enumeration(KINDS)), description: '必填的提交方式，必须是 methods 中已开启的项。必填未提交时无法标记学会。' },
   visibility,
 }
 const id = (args, key) => field(args[key], key, 100)
 const tools = new Map()
+
+tool('course_alias_check', '检查课程短链接是否可用；可访问的占用课程会返回名称和链接，并给出可用替代名。courseId 可排除自己的当前课程。',
+  { alias: string, courseId: string }, ['alias'], ({ DB }, user, args) => checkCourseAlias(DB, user, args.alias, args.courseId), true)
 
 function tool(name, description, properties, required, run, readOnlyHint = false) {
   tools.set(name, {
@@ -183,7 +192,7 @@ export async function handleMcp(request, env) {
       return success({ supportedVersions: [version, ...legacy], capabilities, ...cacheHints })
     case 'initialize':
       return success({ protocolVersion: legacy.includes(rpc.params?.protocolVersion) ? rpc.params.protocolVersion : legacy[0],
-        serverInfo: info, capabilities })
+        serverInfo: info, capabilities, instructions })
     case 'ping':
       return success({})
     case 'tools/list':

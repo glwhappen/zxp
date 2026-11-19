@@ -11,6 +11,7 @@ import { after, before, test } from 'node:test'
 import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
 import { buildSite } from '../scripts/build.mjs'
+import { widgetMarker } from '../src/client/tutorial.js'
 
 const wrangler = resolve('node_modules/wrangler/bin/wrangler.js')
 const config = resolve('wrangler.jsonc')
@@ -226,6 +227,9 @@ test('MCP creates courses with a revocable user token', async () => {
   assert.equal(discovery.result.supportedVersions[0], '2026-07-28')
   const listing = await rpc('tools/list')
   assert(listing.result.tools.some(tool => tool.name === 'course_create'))
+  assert(listing.result.tools.some(tool => tool.name === 'course_alias_check'))
+  const aliasCheck = await rpc('tools/call', { name: 'course_alias_check', arguments: { alias: 'ai-video' } })
+  assert.equal(JSON.parse(aliasCheck.result.content[0].text).conflict.id, 'ai-video')
   assert(!listing.result.tools.some(tool => tool.name === 'stage_create'))
   const created = await rpc('tools/call', { name: 'course_create', arguments: {
     title: 'MCP 课程', stageIds: ['step-one', 'step-two'],
@@ -777,6 +781,54 @@ test('course aliases are unique, author-managed and resolve course, editor and s
   assert.equal((await view('/course/private-alias', collaborator)).view.status, 404)
   await data('/api/courses/private-alias', { cookie: collaborator }, 404)
   assert.equal((await data('/api/courses/private-alias', { cookie: owner })).id, privateCourse.id)
+})
+
+test('alias checks identify legacy course IDs, suggest free names and keep private conflicts private', async () => {
+  const [owner, other] = await Promise.all(['aliasdiagnosticowner', 'aliasdiagnosticother'].map(register))
+  await data('/api/course-alias?alias=ai-video', {}, 401)
+  const status = await data('/api/course-alias?alias=AI-VIDEO', { cookie: owner })
+  assert.equal(status.available, false)
+  assert.equal(status.conflict.title, 'AI 视频创作工作流')
+  assert.equal(status.conflict.path, '/course/ai-video')
+  assert.equal(status.conflict.system, true)
+  assert.equal(status.conflict.usesId, true)
+  assert.match(status.suggestion, /^ai-video-\d+$/)
+  const rejected = await data('/api/courses', { method: 'POST', cookie: owner, json: { title: '我的视频课', alias: 'ai-video' } }, 409)
+  assert.equal(rejected.code, 'COURSE_ALIAS_TAKEN')
+  assert.equal(rejected.aliasStatus.conflict.id, 'ai-video')
+  const own = await data('/api/courses', { method: 'POST', cookie: owner, json: { title: '别名检查课程', alias: status.suggestion } }, 201)
+  assert.equal((await data('/api/course-alias?alias=' + own.alias + '&courseId=' + own.id, { cookie: owner })).available, true)
+  const failed = await data('/api/courses/' + own.id, { method: 'PUT', cookie: owner, json: { title: '不应写入', alias: 'ai-video', expectedRevision: own.revision } }, 409)
+  assert.equal(failed.aliasStatus.conflict.system, true)
+  assert.equal((await data('/api/courses/' + own.id, { cookie: owner })).revision, own.revision)
+  const privateCourse = await data('/api/courses', { method: 'POST', cookie: owner, json: { title: '不可泄露的私有课程名称', alias: 'private-diagnostic' } }, 201)
+  const hidden = await data('/api/course-alias?alias=private-diagnostic', { cookie: other })
+  assert.deepEqual(hidden.conflict, { accessible: false })
+  assert(!JSON.stringify(hidden).includes(privateCourse.id))
+  assert(!JSON.stringify(hidden).includes(privateCourse.title))
+  const hiddenError = await data('/api/courses', { method: 'POST', cookie: other, json: { title: '另一个课程', alias: privateCourse.alias } }, 409)
+  assert.deepEqual(hiddenError.aliasStatus.conflict, { accessible: false })
+  await data('/api/course-alias?alias=private-diagnostic&courseId=' + privateCourse.id, { cookie: other }, 403)
+  await data('/api/course-alias?alias=new', { cookie: owner }, 400)
+})
+
+test('prompt and optional-note Markdown survives course saves and history restores without introducing learning fields', async () => {
+  const owner = await register('contentwidgetowner')
+  const literal = '<script>literal()</script>\n{{ask:提示词里的占位符}}\n{{submit:file|只是原文}}'
+  const tutorial = [widgetMarker('prompt', '视频文案', literal), widgetMarker('details', '可选背景', '**说明**\n\n- 一个要点'), '{{ask:真实账号}}', '{{submit:answer|写下操作结果}}'].join('\n\n')
+  const course = await data('/api/courses', { method: 'POST', cookie: owner, json: { title: '可复制与折叠教程', stageIds: ['one'], newStages: [{ clientId: 'one', title: '练习', task: '先复制再练习', tutorial, methods: ['answer'], required: ['answer'] }] } }, 201)
+  const stageId = course.stages[0].id
+  const stagePath = '/api/stages/' + stageId + '?courseId=' + course.id
+  const initial = await data(stagePath, { cookie: owner })
+  assert.equal(initial.tutorial, tutorial)
+  await data('/api/stages/' + stageId + '/field', { method: 'PUT', cookie: owner, json: { field: '真实账号', value: '测试账号', courseId: course.id } })
+  await data('/api/stages/' + stageId + '/field', { method: 'PUT', cookie: owner, json: { field: '提示词里的占位符', value: '不参与学习统计的旧字段', courseId: course.id } })
+  assert.deepEqual((await data(stagePath, { cookie: owner })).fieldStats.map(field => field.field), ['真实账号'])
+  const updated = await data('/api/courses/' + course.id + '/stages/' + stageId, { method: 'PUT', cookie: owner, json: { title: '练习', task: '先复制再练习', tutorial: tutorial.replace('视频文案', '更新后的文案'), methods: ['learned', 'answer'], required: ['answer'], checkpoint: true, expectedRevision: course.revision } })
+  const versions = await data('/api/courses/' + course.id + '/versions', { cookie: owner })
+  const baseline = versions.items.find(version => version.revision === 0)
+  await data('/api/courses/' + course.id + '/versions/' + baseline.id, { method: 'POST', cookie: owner, json: { expectedRevision: updated.course.revision } })
+  assert.equal((await data(stagePath, { cookie: owner })).tutorial, tutorial)
 })
 
 test('step aliases are unique per course, preserve progress and restore with history', async () => {

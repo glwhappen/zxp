@@ -23,6 +23,7 @@ import { profileFor, readView } from './views.js'
 import { wishApi } from './wishes.js'
 import { collaborationApi } from './collaboration.js'
 import { resolveCourseId, resolveCourseStageId } from './course-access.js'
+import { checkCourseAlias } from './course-aliases.js'
 
 const scriptPath = `/assets/app.${CLIENT_DIGEST}.js`
 const stylePath = `/assets/style.${CSS_DIGEST}.css`
@@ -60,6 +61,9 @@ async function api(request, env, url) {
   if (resource === 'me' && method === 'GET') return json(profileFor(user, settings))
   if (resource === 'token' && ['POST', 'DELETE'].includes(method)) return json(await manageToken(db, user, method))
   await seedExamples(db)
+  if (resource === 'course-alias' && method === 'GET') {
+    return json(await checkCourseAlias(db, user, url.searchParams.get('alias') ?? '', url.searchParams.get('courseId')))
+  }
   if (resource === 'view' && method === 'GET') {
     const view = await readView(request, env, user, settings, url.searchParams.get('path'))
     return json({ profile: profileFor(user, settings), view })
@@ -147,7 +151,7 @@ export default {
         ...security, 'Content-Type': type, 'Cache-Control': asset ? 'public, max-age=31536000, immutable' : 'no-cache',
       } })
     } catch (error) {
-      if (error instanceof RequestError) return json({ error: error.message }, error.status)
+      if (error instanceof RequestError) return json({ error: error.message, ...error.details }, error.status)
       console.error(error)
       return json({ error: '服务暂时不可用，请稍后重试。' }, 500)
     }

@@ -7,6 +7,7 @@ import { listNotes } from './notes.js'
 import { ADMIN_LABELS, COURSE_LABELS, courseLabelKeys } from '../shared.js'
 import { commitCourse, courseAlias, editableCourse, expectEditor, expectRevision, guardCourse, publicCourse, readableCourse, sharedCourse, stageAlias } from './course-access.js'
 import { checkpoint } from './course-history.js'
+import { requireCourseAlias } from './course-aliases.js'
 import {
   insertPrerequisites, lockedByPrerequisites, prerequisiteInput, prerequisiteLockMessage, prerequisiteQuery,
   requireStageLearning, validatePrerequisites,
@@ -323,6 +324,7 @@ export async function saveCourse(db, user, data, courseId) {
   const kept = (current?.labels ?? []).filter(key => adminOnly.has(key))
   const labels = user?.isAdmin ? requested : Object.keys(COURSE_LABELS).filter(key => mine.includes(key) || kept.includes(key))
   const id = courseId ?? crypto.randomUUID()
+  if (alias !== current?.alias) await requireCourseAlias(db, user, alias, current?.id)
   const details = { title, description, category, theme, visibility, alias }
   const labelsChanged = JSON.stringify(labels) !== JSON.stringify(current?.labels ?? [])
   if (labelsChanged && current && !current.owned) fail(403, '只有课程作者可以调整课程标签。')
@@ -380,7 +382,12 @@ export async function saveCourse(db, user, data, courseId) {
   if (!current || data.checkpoint) {
     queries.push(...checkpoint(db, id, current ? revision + Number(changed) : 0, actor, current ? 'manual' : 'initial'))
   }
-  await commitCourse(db, queries)
+  try {
+    await commitCourse(db, queries)
+  } catch (error) {
+    if (error.details?.code === 'COURSE_ALIAS_TAKEN') await requireCourseAlias(db, user, alias, current?.id)
+    throw error
+  }
   return courseAtRevision(db, user, id, current ? revision + Number(changed) : 0)
 }
 

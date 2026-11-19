@@ -4,10 +4,22 @@ import { Markdown } from '@tiptap/markdown'
 import Image from '@tiptap/extension-image'
 import { TableKit } from '@tiptap/extension-table'
 import { TaskList, TaskItem } from '@tiptap/extension-list'
-import { tutorialTokens } from './tutorial.js'
+import CodeBlock from '@tiptap/extension-code-block'
+import { fencedCode, readCodeToken, tutorialTokens } from './tutorial.js'
+
+const LosslessCodeBlock = CodeBlock.extend({
+  parseMarkdown(token, helpers) {
+    const code = readCodeToken(token.raw ?? '')
+    if (!code) return []
+    return helpers.createNode('codeBlock', { language: code.language }, code.content ? [helpers.createTextNode(code.content)] : [])
+  },
+  renderMarkdown(node, helpers) {
+    return fencedCode(node.attrs?.language || '', helpers.renderChildren(node.content ?? []))
+  },
+})
 
 // This module is loaded only when an author opens a text editor.
-export function mountMarkdownEditor(container, { markdown, references = '', onChange, onInsert, onClose }) {
+export function mountMarkdownEditor(container, { markdown, references = '', canInsert = true, onChange, onInsert, onClose }) {
   container.innerHTML = `<div class="rich-editor">
     <div class="rich-toolbar" role="toolbar" aria-label="正文格式">
       <select data-rich-format aria-label="文字格式"><option value="paragraph">正文</option><option value="1">一级标题</option><option value="2">二级标题</option><option value="3">三级标题</option></select>
@@ -38,7 +50,7 @@ export function mountMarkdownEditor(container, { markdown, references = '', onCh
       <div class="rich-modes" role="group" aria-label="编辑模式"><button type="button" data-rich-command="visual" aria-pressed="true">所见即所得</button><button type="button" data-rich-command="source" aria-pressed="false">Markdown</button></div>
       <button type="button" class="text-btn" data-rich-command="done">收起编辑</button>
     </div>
-    <div class="rich-insert" aria-label="在光标处插入"><span class="subtle">在光标处插入</span>${[['question', '提问'], ['answer', '答案框'], ['screenshot', '截图上传'], ['file', '文件上传']].map(([type, label]) => `<button type="button" data-rich-insert="${type}">＋ ${label}</button>`).join('')}</div>
+    <div class="rich-insert" aria-label="在光标处插入" ${canInsert ? '' : 'hidden'}><span class="subtle">在光标处插入</span>${[['prompt', '提示词'], ['details', '折叠说明'], ['question', '提问'], ['answer', '答案框'], ['screenshot', '截图上传'], ['file', '文件上传']].map(([type, label]) => `<button type="button" data-rich-insert="${type}">＋ ${label}</button>`).join('')}</div>
   </div>`
   const source = container.querySelector('[data-rich-source]')
   const content = container.querySelector('[data-rich-content]')
@@ -57,7 +69,8 @@ export function mountMarkdownEditor(container, { markdown, references = '', onCh
     element: content,
     injectCSS: false,
     extensions: [
-      StarterKit.configure({ underline: false, trailingNode: false, link: { openOnClick: false, autolink: false, linkOnPaste: false } }),
+      StarterKit.configure({ underline: false, trailingNode: false, codeBlock: false, link: { openOnClick: false, autolink: false, linkOnPaste: false } }),
+      LosslessCodeBlock,
       Markdown.configure({ markedOptions: { gfm: true }, indentation: { style: 'space', size: 2 } }),
       Image.configure({ allowBase64: true }), TableKit.configure({ table: { resizable: false } }),
       TaskList, TaskItem.configure({ nested: true }),

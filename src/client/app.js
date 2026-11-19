@@ -2,13 +2,14 @@ import { icon } from './icons.js'
 import { adminPage, providerNames } from './admin.js'
 import { createViewCache } from './view-cache.js'
 import { createCourseAutosave } from './course-autosave.js'
+import { mountCourseAliasCheck } from './course-alias-check.js'
 import { lessonBlocks, lessonPayload, lessonReferences, mergeTextBlocks, quickBlock, quickFieldPreview, quickLesson, updateBlock } from './quick-lesson.js'
 import { captureScreenshot, pasteScreenshot } from './screen-capture.js'
 import { courseHistory, courseSharingForm, courseVersionPreview, editorChoices } from './collaboration.js'
 import { wishBoard, wishCoursePicker, wishCourses, wishDiscussion, wishForm, wishHeading, wishPage, wishPath } from './wishes.js'
-import { askMarker, hasSubmissionMarker, submissionKinds, submissionMarker, submissionSpecs } from './tutorial.js'
+import { askMarker, hasSubmissionMarker, submissionKinds, submissionMarker, submissionSpecs, widgetMarker } from './tutorial.js'
 import {
-  button, card, categories, courseEditor, coursePage, coursePath, esc, hero, key, link, note, notesPanel, outline,
+  button, card, categories, courseEditor, coursePage, coursePath, esc, hero, key, lessonWidget, link, note, notesPanel, outline,
   pickedStages, prerequisiteEditor, progress, stageEditor, stagePage, stagePath, stageStats, submission, visibility,
 } from './views.js'
 
@@ -41,7 +42,10 @@ async function api(path, options = {}) {
     headers: options.body === undefined ? undefined : { 'Content-Type': 'application/json' },
   })
   const data = await res.json().catch(() => null)
-  if (!res.ok || !data) throw new ApiError(res.status, data?.error ?? '服务暂时不可用，请重试。')
+  if (!res.ok || !data) {
+    if (data?.aliasStatus) state.editor?.aliasCheck?.show(data.aliasStatus)
+    throw new ApiError(res.status, data?.error ?? '服务暂时不可用，请重试。')
+  }
   return data
 }
 
@@ -273,6 +277,7 @@ function stagesPage(stages) {
       ${icon('arrow', 16)}</a>`).join('') || note('还没有关卡。到「我的创作」编辑课程，点「新建关卡」创建后就能在其他课程里引用。')}</div>`}
 
 function paintView({ profile, view }, path) {
+  state.editor?.aliasCheck?.dispose()
   state.editor?.autosave?.discard()
   destroyQuickEditors()
   state.quick?.autosave.discard()
@@ -557,6 +562,9 @@ function mountCourseEditor(course, available, prerequisiteChoices = []) {
   }
   state.editor = editor
   main.innerHTML = courseEditor(editor)
+  editor.aliasCheck = mountCourseAliasCheck(main.querySelector('[data-form="course"]'), {
+    api, courseId: course?.id, isCurrent: () => state.editor === editor && editor.userId === state.user?.id,
+  })
   if (!course) return
   editor.autosave = createCourseAutosave({
     status(message, kind) {
@@ -700,10 +708,12 @@ async function openQuickText(control) {
     const { mountMarkdownEditor } = await markdownEditorModule
     if (state.quick !== editor || state.user?.id !== editor.userId || !mount.isConnected || editor.richOpening.get(id) !== opening) return
     const rich = mountMarkdownEditor(mount, {
-      markdown: block.raw, references: lessonReferences(editor),
+      markdown: block.type === 'details' ? block.content : block.raw,
+      references: lessonReferences(editor), canInsert: block.type !== 'details',
       onChange(raw) {
         if (state.quick !== editor || state.user?.id !== editor.userId || !mount.isConnected) return
-        updateBlock(block, { dataset: { quickProperty: 'text' }, value: raw })
+        updateBlock(block, { dataset: { quickProperty: block.type === 'details' ? 'content' : 'text' }, value: raw })
+        if (block.type === 'details') refreshQuickWidgetPreview(container, block)
         queueQuickLesson()
       },
       onInsert: (type, split) => addQuickBlock(type, id, split),
@@ -725,9 +735,17 @@ async function openQuickText(control) {
   }
 }
 
+function refreshQuickWidgetPreview(container, block) {
+  const preview = container.querySelector('[data-quick-widget-preview]')
+  if (!preview) return
+  const open = preview.querySelector('details')?.open
+  preview.innerHTML = '<small class="subtle">学习者预览</small>' + lessonWidget(block)
+  if (open) preview.querySelector('details').open = true
+}
+
 function addQuickBlock(type, afterId, split) {
   const editor = state.quick
-  if (!editor || !['text', 'question', ...submissionKinds].includes(type)) return
+  if (!editor || !['text', 'question', 'prompt', 'details', ...submissionKinds].includes(type)) return
   flushQuickEditors()
   if (submissionKinds.includes(type) && editor.blocks.some(block => block.type === type)) {
     const existing = editor.blocks.find(block => block.type === type)
@@ -739,7 +757,11 @@ function addQuickBlock(type, afterId, split) {
   }
   const question = type === 'question'
   const block = { id: crypto.randomUUID(), type, name: '新问题', fieldKey: 'q-' + crypto.randomUUID(), options: [], prompt: '请在这里填写具体的提交要求' }
-  block.raw = type === 'text' ? '新段落\n\n' : question
+  if (['prompt', 'details'].includes(type)) {
+    block.title = type === 'prompt' ? '提示词' : '补充说明'
+    block.content = type === 'prompt' ? '' : '在这里补充可选的说明。'
+  }
+  block.raw = ['prompt', 'details'].includes(type) ? widgetMarker(type, block.title, block.content) + '\n\n' : type === 'text' ? '新段落\n\n' : question
     ? '{{ask:新问题||key=' + block.fieldKey + '}}\n\n' : submissionMarker(type, block.prompt) + '\n\n'
   let targetId = block.id
   const after = editor.blocks.findIndex(item => item.id === afterId)
@@ -763,7 +785,7 @@ function addQuickBlock(type, afterId, split) {
   const container = main.querySelector(`[data-quick-block="${targetId}"]`)
   container.scrollIntoView({ block: 'center', behavior: 'smooth' })
   if (type === 'text') openQuickText(container.querySelector('.quick-text-preview'))
-  else container.querySelector('[data-quick-property]').focus({ preventScroll: true })
+  else container.querySelector(type === 'prompt' ? '[data-quick-property="content"]' : '[data-quick-property]').focus({ preventScroll: true })
 }
 
 async function searchCollaborators() {
@@ -926,6 +948,17 @@ async function handleAction(control) {
   const action = control.dataset.action
   const id = control.dataset.id
   switch (action) {
+    case 'copy-snippet': {
+      const source = control.closest('[data-copy-source]').querySelector('pre code, pre')
+      if (!await copyText(source.textContent)) throw new Error('复制失败，请选中文字后手动复制。')
+      const version = String(Number(control.dataset.copyVersion ?? 0) + 1)
+      control.dataset.copyVersion = version
+      control.innerHTML = icon('check', 16) + ' 已复制'
+      setTimeout(() => {
+        if (control.isConnected && control.dataset.copyVersion === version) control.innerHTML = icon('copy', 16) + ' ' + esc(control.dataset.copyLabel)
+      }, 1800)
+      break
+    }
     case 'quick-lesson':
       await startQuickLesson()
       break
@@ -1708,6 +1741,7 @@ document.addEventListener('input', event => {
         updateBlock(block, input)
         const preview = input.closest('[data-quick-block]').querySelector('[data-quick-field-preview]')
         if (preview) preview.outerHTML = quickFieldPreview(block, editor)
+        if (['prompt', 'details'].includes(block.type)) refreshQuickWidgetPreview(input.closest('[data-quick-block]'), block)
       }
     }
     if (!event.isComposing) queueQuickLesson()

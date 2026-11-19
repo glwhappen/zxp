@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { hasAskMarker, hasSubmissionMarker, layoutTutorial, submissionSpecs, tutorialTokens } from '../src/client/tutorial.js'
+import { contentWidget, hasAskMarker, hasSubmissionMarker, layoutTutorial, submissionSpecs, tutorialTokens, widgetMarker } from '../src/client/tutorial.js'
+import { marked } from 'marked'
 
 test('submissions without markers stay at the end of the tutorial', () => {
   const markdown = '## 获取密钥\n\n记录模型名称。\n\n## 配置客户端\n\n填写配置。\n\n## 验证连接\n\n检查模型的回复。'
@@ -78,4 +79,28 @@ test('edited question labels retain their original answer key and token source i
   assert.deepEqual(layoutTutorial(markdown, []).blocks.find(block => block.field).field, {
     name: '现在的标题', options: ['选项一', '选项二'], key: '原来的问题',
   })
+})
+
+test('prompt blocks preserve literal content, placeholders and exact trailing line breaks', () => {
+  for (const content of ['', '第一行\n第二行', '  保留缩进\n\n{{ask:只作为原文}}\n', '```json\n{"topic":"<script>"}\n```\n\n']) {
+    const raw = widgetMarker('prompt', '镜头 `Prompt`', content)
+    assert.deepEqual(contentWidget(marked.lexer(raw)[0]), { type: 'prompt', title: '镜头 `Prompt`', content })
+    assert.equal(hasAskMarker(raw, '只作为原文'), false)
+    assert.deepEqual(submissionSpecs(raw), [])
+  }
+})
+
+test('prompt and collapsible blocks retain their position between learning fields', () => {
+  const markdown = ['开始。', widgetMarker('prompt', '生成分镜', '请生成三镜头。'), '{{ask:你的方向？}}', widgetMarker('details', '可选说明', '**补充背景**\n\n- 要点一'), '{{submit:screenshot|上传截图}}', '结束。'].join('\n\n')
+  const { blocks, remaining } = layoutTutorial(markdown, ['screenshot'])
+  assert.deepEqual(blocks.map(block => block.widget?.type ?? (block.field ? 'question' : block.kind ?? 'text')), ['text', 'prompt', 'question', 'details', 'screenshot', 'text'])
+  assert.deepEqual(remaining, [])
+  assert.equal(tutorialTokens(markdown).map(token => token.raw).join(''), markdown)
+})
+
+test('outer collapsible fences grow to keep nested prompts and code intact', () => {
+  const content = widgetMarker('prompt', '带代码的提示词', '请参考：\n```js\nrun()\n```')
+  const raw = widgetMarker('details', '展开查看', content)
+  assert.equal(contentWidget(marked.lexer(raw)[0]).content, content)
+  assert.equal(contentWidget(marked.lexer(content)[0]).type, 'prompt')
 })

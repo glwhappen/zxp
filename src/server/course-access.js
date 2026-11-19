@@ -67,7 +67,7 @@ export async function commitCourse(db, queries) {
     return await db.batch(queries)
   } catch (error) {
     if (/course_stages\.alias|course_stage_alias_conflict/.test(String(error.message))) fail(409, '这个课程里已经有步骤使用该别名，请换一个。')
-    if (/courses\.alias|course_alias_conflict/.test(String(error.message))) fail(409, '课程别名已被使用，请换一个。')
+    if (/courses\.alias|course_alias_conflict/.test(String(error.message))) fail(409, '课程别名已被使用，请换一个。', { code: 'COURSE_ALIAS_TAKEN' })
     if (String(error.message).includes('valid_course_revision')) fail(409, '课程刚被更新。请读取最新版本后再保存。')
     if (String(error.message).includes('prerequisite_cycle')) fail(409, '前置课程不能形成循环。')
     if (String(error.message).includes('prerequisite_visibility')) fail(409, '前置课程的可见性与引用它的课程冲突，请先调整前置设置。')

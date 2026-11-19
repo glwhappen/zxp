@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { lessonBlocks, lessonPayload, mergeTextBlocks } from '../src/client/quick-lesson.js'
+import { lessonBlocks, lessonPayload, mergeTextBlocks, updateBlock } from '../src/client/quick-lesson.js'
+import { tutorialTokens, widgetMarker } from '../src/client/tutorial.js'
 
 test('continuous Markdown stays together and preserves its complete source', () => {
   const markdown = '## 配置账号\n\n第一段。\n\n第二段。\n\n- 检查密钥\n- 检查模型\n\n|模型|状态|\n|---|---|\n|示例|可用|\n\n![截图](/image.png)\n\n[文档][doc]\n\n[doc]: https://example.org\n'
@@ -40,4 +41,15 @@ test('rejoining text preserves indentation in Markdown code blocks', () => {
   const merged = mergeTextBlocks(blocks.filter(block => block.type === 'text'))
   assert.equal(merged.length, 1)
   assert.match(merged[0].raw, /\n\n    const key/)
+})
+
+test('quick editing treats prompts and optional notes as editable blocks without changing answer identities', () => {
+  const source = ['一段正文。', widgetMarker('prompt', '原题', '第一条提示词'), '{{ask:账号||key=original}}', widgetMarker('details', '可选说明', '## 补充\n\n两段文字。')].join('\n\n')
+  const blocks = lessonBlocks(source)
+  assert.deepEqual(blocks.map(block => block.type), ['text', 'prompt', 'question', 'details'])
+  assert.equal(blocks[2].fieldKey, 'original')
+  updateBlock(blocks[1], { dataset: { quickProperty: 'content' }, value: '保留换行\n{{submit:file|字面内容}}\n' })
+  updateBlock(blocks[3], { dataset: { quickProperty: 'title' }, value: '为什么这样做' })
+  assert.equal(tutorialTokens(blocks[1].raw)[0].widget.content, '保留换行\n{{submit:file|字面内容}}\n')
+  assert.equal(tutorialTokens(blocks[3].raw)[0].widget.title, '为什么这样做')
 })

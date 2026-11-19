@@ -1,7 +1,8 @@
 import DOMPurify from 'dompurify'
+import { marked } from 'marked'
 import { COURSE_LABELS, kindLabels, LABELS } from '../shared.js'
 import { icon } from './icons.js'
-import { layoutTutorial, submissionKinds } from './tutorial.js'
+import { contentWidget, layoutTutorial, submissionKinds } from './tutorial.js'
 
 export const esc = value => String(value ?? '').replace(/[&<>"']/g, char =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
@@ -217,14 +218,47 @@ function askSlot(stage, field, signedIn = true) {
 }
 
 export function markdownBlock(html) {
-  const safe = DOMPurify.sanitize(html, {
+  let safe = DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ['form', 'input', 'button', 'select', 'textarea', 'style', 'iframe'],
     FORBID_ATTR: ['style', 'id', 'class'],
     ALLOW_DATA_ATTR: false,
+    ADD_ATTR: ['target', 'rel'],
   })
+  // 教程里的外链一律新标签页打开，别把课程页顶掉。
+  safe = safe.replace(/<a (?![^>]*\btarget=)/g, '<a target="_blank" rel="noopener noreferrer" ')
   // 宽表格在窄屏上横向滚动，而不是把整页撑开
-  return `<div class="markdown">${safe.replace(/<table>/g, '<div class="table-wrap"><table>').replace(/<\/table>/g, '</table></div>')}</div>`
+  const tables = safe.replace(/<table>/g, '<div class="table-wrap"><table>').replace(/<\/table>/g, '</table></div>')
+  const copyable = tables.replace(/<pre>([\s\S]*?)<\/pre>/g, (_, code) =>
+    `<div class="code-sample" data-copy-source><div class="code-sample-head"><span>可复制内容</span>${button('copy-snippet', '复制', 'text-btn', 'copy', 'data-copy-label="复制" aria-live="polite"')}</div><pre tabindex="0">${code}</pre></div>`)
+  return `<div class="markdown">${copyable}</div>`
+}
+
+export function lessonWidget(widget, depth = 0) {
+  if (widget.type === 'prompt') {
+    return `<section class="prompt-card" data-copy-source><div class="prompt-head"><h3>${icon('spark', 18)}<span>${esc(widget.title || '提示词')}</span></h3>
+      ${button('copy-snippet', '复制提示词', 'btn prompt-copy', 'copy', `data-copy-label="复制提示词" aria-live="polite" ${widget.content ? '' : 'disabled'}`)}</div>
+      <pre tabindex="0"><code>${esc(widget.content)}</code></pre></section>`
+  }
+  return `<details class="lesson-fold"><summary>${icon('chevron', 17)}<span>${esc(widget.title || '补充说明')}</span><small class="fold-hint" aria-hidden="true"></small></summary>
+    <div class="fold-body">${depth < 8 ? renderLessonMarkdown(widget.content, depth + 1) : markdownBlock(marked.parse(widget.content))}</div></details>`
+}
+
+export function renderLessonMarkdown(markdown, depth = 0) {
+  const tokens = marked.lexer(markdown)
+  const result = []
+  let start = 0
+  for (let index = 0; index < tokens.length; index++) {
+    const widget = contentWidget(tokens[index])
+    if (!widget) continue
+    const html = marked.parser(tokens.slice(start, index))
+    if (html.trim()) result.push(markdownBlock(html))
+    result.push(lessonWidget(widget, depth))
+    start = index + 1
+  }
+  const html = marked.parser(tokens.slice(start))
+  if (html.trim()) result.push(markdownBlock(html))
+  return result.join('')
 }
 
 function tutorialPanel(stage, signedIn) {
@@ -235,7 +269,7 @@ function tutorialPanel(stage, signedIn) {
   }
 
   const { blocks } = layoutTutorial(stage.tutorial, kinds)
-  const content = blocks.map(block => block.kind ? submissionSlot(stage, block.kind, block.prompt)
+  const content = blocks.map(block => block.widget ? lessonWidget(block.widget) : block.kind ? submissionSlot(stage, block.kind, block.prompt)
     : block.field ? askSlot(stage, block.field, signedIn) : markdownBlock(block.html)).join('')
   // 提交框只出现在作者手动占位的位置；没写 {{submit:...}} 就不显示任何提交框。
   return `<section class="lesson-panel lesson-tutorial"><h2>${icon('book', 20)} 教程</h2>
@@ -385,9 +419,10 @@ export function courseEditor(editor) {
       <h2>课程信息</h2>
       <label>课程名称<input name="title" maxlength="100" required value="${esc(item.title)}" placeholder="例如，AI 视频创作工作流"></label>
       ${!item.id || item.owned ? `<label><span class="field-label">课程别名 <span class="subtle">选填</span></span>
-        <input name="alias" maxlength="60" minlength="2" pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*"
+        <input name="alias" aria-label="课程别名" aria-describedby="course-alias-help course-alias-status" maxlength="60" minlength="2" pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*"
           value="${esc(item.alias)}" placeholder="例如 pan-baidu" autocapitalize="none" spellcheck="false">
-        <small class="subtle">2–60 个英文字母、数字或短横线，不能重复。保存后优先使用 /course/别名。</small></label>` : ''}
+        <small id="course-alias-help" class="subtle">2–60 个英文字母、数字或短横线，不能重复。保存后优先使用 /course/别名。</small>
+        <span id="course-alias-status" class="alias-status" data-course-alias-status role="status" aria-live="polite"></span></label>` : ''}
       <label>课程介绍<textarea name="description" maxlength="1200" rows="3" placeholder="学完这门课程，可以完成什么？">${esc(item.description)}</textarea></label>
       <div class="form-columns">
         <label>课程分类<select name="category">${options(categories.map(name => [name, name]), item.category ?? 'AI 创作')}</select></label>
