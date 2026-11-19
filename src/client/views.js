@@ -15,7 +15,10 @@ export const methods = {
   file: [LABELS.file, 'file'],
 }
 export const coursePath = course => '/course/' + key(typeof course === 'string' ? course : course.alias || course.id)
-export const stagePath = (id, course) => course ? coursePath(course) + '/stage/' + key(id) : '/stage/' + key(id)
+export function stagePath(id, course) {
+  const alias = course?.stages?.find(stage => stage.id === id)?.alias
+  return course ? coursePath(course) + '/stage/' + key(alias || id) : '/stage/' + key(id)
+}
 export const link = (url, label, style = 'btn', symbol) =>
   `<a class="${style}" href="${esc(url)}" data-link>${symbol ? icon(symbol, 17) : ''}${label}</a>`
 export const button = (action, label, style = 'btn', symbol, attrs = '') =>
@@ -338,7 +341,7 @@ export function pickedStages(editor) {
     const depNote = deps.length
       ? `<small class="dep-note">${icon('lock', 13)} 需先学会：${esc(deps.map(dep => titles.get(dep) ?? dep).join('、'))}</small>` : ''
     return `<li><span class="step-number">${index + 1}</span><div class="step-text"><strong>${esc(stage?.title ?? id)}</strong>
-      <small>${stage?.visibility === 'public' ? '公开' : '私有'}${stage?.owned ? ' · 我的关卡' : stage?.author ? ` · ${esc(stage.author)}` : ''}</small>${depNote}</div>
+      <small>${stage?.visibility === 'public' ? '公开' : '私有'}${stage?.owned ? ' · 我的关卡' : stage?.author ? ` · ${esc(stage.author)}` : ''}${stage?.alias ? ' · /' + esc(stage.alias) : ''}</small>${depNote}</div>
       ${index > 0 ? button('pick-deps', '', 'icon-btn', 'lock', `${attrs} aria-label="设置前置关卡" title="前置关卡"`) : ''}
       ${editor.course ? button('edit-course-lesson', '', 'icon-btn', 'pen',
         `${attrs} aria-label="编辑课程讲义" title="编辑课程讲义"`)
@@ -415,6 +418,10 @@ export function stageEditor(stage, mode = 'stage') {
   const lesson = mode === 'course-lesson'
   return `<form data-form="${mode}" data-id="${esc(stage?.id)}">
     <label>关卡名称<input name="title" required maxlength="100" value="${esc(stage?.title)}"></label>
+    ${mode !== 'stage' ? `<label>步骤别名 <span class="subtle">选填</span>
+      <input name="alias" maxlength="60" minlength="2" pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*"
+        value="${esc(stage?.alias)}" placeholder="例如 bind" autocapitalize="none" spellcheck="false">
+      <small class="subtle">同一课程内不能重复，链接会优先使用别名。</small></label>` : ''}
     <label>学习任务<textarea name="task" required maxlength="5000" rows="2" placeholder="描述一个可以完成的任务">${esc(stage?.task)}</textarea></label>
     <label>教程 <span class="subtle">支持 Markdown</span><textarea name="tutorial" rows="6" maxlength="35000" placeholder="练习步骤、示例和参考链接">${esc(stage?.tutorial)}</textarea></label>
     <div class="placement-tools">

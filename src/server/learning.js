@@ -5,7 +5,7 @@ import { choice, fail, field, requireUser, rows, statement } from './core.js'
 import { submissionSpecs, tutorialFields } from '../client/tutorial.js'
 import { listNotes } from './notes.js'
 import { ADMIN_LABELS, COURSE_LABELS, courseLabelKeys } from '../shared.js'
-import { commitCourse, courseAlias, editableCourse, expectEditor, expectRevision, guardCourse, publicCourse, readableCourse, sharedCourse } from './course-access.js'
+import { commitCourse, courseAlias, editableCourse, expectEditor, expectRevision, guardCourse, publicCourse, readableCourse, sharedCourse, stageAlias } from './course-access.js'
 import { checkpoint } from './course-history.js'
 import {
   insertPrerequisites, lockedByPrerequisites, prerequisiteInput, prerequisiteLockMessage, prerequisiteQuery,
@@ -61,7 +61,7 @@ export async function courseDetail(db, user, courseId) {
   const [courseResult, stageResult, requirementsResult] = await db.batch([
     statement(db, courseSelect + ` WHERE c.id = ?2 AND ${readableCourse('?1')}`, id, courseId),
     statement(db, `
-      SELECT s.id, COALESCE(l.title, s.title) AS title, COALESCE(l.task, s.task) AS task,
+      SELECT s.id, cs.alias, COALESCE(l.title, s.title) AS title, COALESCE(l.task, s.task) AS task,
         s.visibility, COALESCE(l.methods, s.methods) AS methods, COALESCE(l.required, s.required) AS required,
         COALESCE(l.required_fields, '[]') AS required_fields, cs.requires,
         EXISTS(SELECT 1 FROM progress p WHERE p.stage_id = s.id AND p.user_id = ?1) AS marked,
@@ -86,6 +86,7 @@ export async function courseDetail(db, user, courseId) {
     const missingFields = missingRequired(requiredFields, parseList(entry.answered))
     return {
       id: entry.id,
+      alias: entry.alias,
       title: entry.title,
       task: entry.task,
       visibility: entry.visibility,
@@ -114,7 +115,7 @@ export async function courseAtRevision(db, user, id, revision) {
 
 export function courseOverview(course) {
   if (!course.learningLocked) return course
-  return { ...course, stages: course.stages.map(({ id, title, learned, visibility }) => ({ id, title, learned, visibility })) }
+  return { ...course, stages: course.stages.map(({ id, alias, title, learned, visibility }) => ({ id, alias, title, learned, visibility })) }
 }
 
 // 课程只能引用自己创建的关卡，所以「可用」与「我的」两个范围一致。
@@ -136,7 +137,7 @@ function stageQuery(db, user, stageId, courseId) {
   if (courseId !== undefined && courseId !== null && courseId !== '') {
     field(courseId, '课程 ID', 100)
     return statement(db, `
-      SELECT s.id, COALESCE(l.title, s.title) AS title, COALESCE(l.task, s.task) AS task,
+      SELECT s.id, cs.alias, COALESCE(l.title, s.title) AS title, COALESCE(l.task, s.task) AS task,
         COALESCE(l.tutorial, s.tutorial) AS tutorial, s.visibility,
         COALESCE(l.methods, s.methods) AS methods, COALESCE(l.required, s.required) AS required,
         COALESCE(l.required_fields, '[]') AS required_fields, s.owner_id = ?1 AS owned,
@@ -286,7 +287,10 @@ export async function saveCourse(db, user, data, courseId) {
   for (const draft of drafts) {
     const clientId = field(draft?.clientId, '新关卡标记', 100)
     if (!selection.includes(clientId) || newStages.has(clientId)) fail(400, '新关卡编排无效。')
-    newStages.set(clientId, { ...stageInput({ ...draft, visibility: draft.visibility ?? visibility }), id: crypto.randomUUID() })
+    newStages.set(clientId, {
+      ...stageInput({ ...draft, visibility: draft.visibility ?? visibility }),
+      alias: stageAlias(draft.alias ?? null), id: crypto.randomUUID(),
+    })
   }
   const added = selection.filter(id => !newStages.has(id) && !existingIds.includes(id))
   if (added.length) {
@@ -369,6 +373,9 @@ export async function saveCourse(db, user, data, courseId) {
       queries.push(statement(db, 'UPDATE course_stages SET requires = ? WHERE course_id = ? AND stage_id = ?',
         JSON.stringify(requires.get(stageId) ?? []), id, stageId))
     }
+  }
+  for (const stage of newStages.values()) {
+    queries.push(statement(db, 'UPDATE course_stages SET alias = ? WHERE course_id = ? AND stage_id = ?', stage.alias, id, stage.id))
   }
   if (!current || data.checkpoint) {
     queries.push(...checkpoint(db, id, current ? revision + Number(changed) : 0, actor, current ? 'manual' : 'initial'))

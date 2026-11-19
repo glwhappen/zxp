@@ -230,7 +230,7 @@ test('MCP creates courses with a revocable user token', async () => {
   const created = await rpc('tools/call', { name: 'course_create', arguments: {
     title: 'MCP 课程', stageIds: ['step-one', 'step-two'],
     newStages: [
-      { clientId: 'step-one', title: 'MCP 关卡一', task: '先做这一步', tutorial: '先做这一步\n\n{{submit:answer|写下你的答案}}', methods: ['learned', 'answer'], required: ['answer'] },
+      { clientId: 'step-one', alias: 'setup', title: 'MCP 关卡一', task: '先做这一步', tutorial: '先做这一步\n\n{{submit:answer|写下你的答案}}', methods: ['learned', 'answer'], required: ['answer'] },
       { clientId: 'step-two', title: 'MCP 关卡二', task: '再做这一步', methods: ['learned'] },
     ],
     requires: { 'step-two': ['step-one'] },
@@ -777,6 +777,71 @@ test('course aliases are unique, author-managed and resolve course, editor and s
   assert.equal((await view('/course/private-alias', collaborator)).view.status, 404)
   await data('/api/courses/private-alias', { cookie: collaborator }, 404)
   assert.equal((await data('/api/courses/private-alias', { cookie: owner })).id, privateCourse.id)
+})
+
+test('step aliases are unique per course, preserve progress and restore with history', async () => {
+  const [owner, learner] = await Promise.all(['stepaliasowner', 'stepaliaslearner'].map(register))
+  const course = await data('/api/courses', { method: 'POST', cookie: owner, json: {
+    title: '步骤短链接', alias: 'step-alias-course', visibility: 'public', stageIds: ['intro', 'bind'],
+    newStages: [
+      { clientId: 'intro', alias: 'Intro', title: '了解规则', task: '阅读规则' },
+      { clientId: 'bind', alias: 'bind', title: '绑定账号', task: '完成绑定' },
+    ],
+    requires: { bind: ['intro'] },
+  } }, 201)
+  const [intro, bind] = course.stages
+  const base = '/api/courses/' + course.id
+  const view = (name, cookie) => data('/api/view?path=' + encodeURIComponent('/course/step-alias-course/stage/' + name), { cookie })
+  assert.equal(intro.alias, 'intro')
+  const locked = await view('BIND', learner)
+  assert.equal(locked.view.stage.id, bind.id)
+  assert.equal(locked.view.stage.alias, 'bind')
+  assert.equal(locked.view.course.stages[1].locked, true)
+  await data('/api/stages/' + intro.id + '/learned', { method: 'PUT', cookie: learner, json: { learned: true, courseId: course.id } })
+  await data('/api/stages/' + bind.id + '/learned', { method: 'PUT', cookie: learner, json: { learned: true, courseId: course.id } })
+  const baseline = (await data(base + '/versions', { cookie: owner })).items[0]
+  const lesson = { title: bind.title, task: bind.task, tutorial: '', expectedRevision: course.revision }
+  await data(base + '/stages/bind', { method: 'PUT', cookie: owner, json: { ...lesson, title: '冲突不应写入', alias: 'INTRO' } }, 409)
+  const unchanged = await data(base, { cookie: owner })
+  assert.equal(unchanged.revision, course.revision)
+  assert.equal(unchanged.stages[1].title, bind.title)
+  const renamed = await data(base + '/stages/bind', { method: 'PUT', cookie: owner, json: { ...lesson, alias: 'connect' } })
+  assert.equal(renamed.stage.alias, 'connect')
+  assert.equal((await view('bind', learner)).view.status, 404)
+  assert.equal((await view(bind.id, learner)).view.stage.learned, true)
+  assert.equal((await view('connect', learner)).view.stage.id, bind.id)
+  assert.equal((await data(base + '/stages/connect', { cookie: owner })).id, bind.id)
+  await data(base + '/stages/connect', { method: 'PUT', cookie: learner, json: { ...lesson, alias: 'blocked', expectedRevision: renamed.course.revision } }, 403)
+  const reused = await data('/api/courses', { method: 'POST', cookie: owner, json: {
+    title: '复用关卡别名', visibility: 'public', stageIds: [bind.id],
+  } }, 201)
+  const other = await data('/api/courses/' + reused.id + '/stages/' + bind.id, { method: 'PUT', cookie: owner, json: {
+    ...lesson, alias: 'connect', expectedRevision: reused.revision,
+  } })
+  assert.equal(other.stage.alias, 'connect')
+  assert.equal((await data(base, { cookie: learner })).stages[1].alias, 'connect')
+  const restored = await data(base + '/versions/' + baseline.id, { method: 'POST', cookie: owner, json: {
+    expectedRevision: renamed.course.revision,
+  } })
+  assert.deepEqual(restored.stages.map(stage => stage.alias), ['intro', 'bind'])
+  assert.deepEqual(restored.stages[1].requires, [intro.id])
+  assert.equal((await view('bind', learner)).view.stage.learned, true)
+  assert.equal((await data('/api/courses/' + reused.id, { cookie: owner })).stages[0].alias, 'connect')
+  const added = await data(base + '/stages', { method: 'POST', cookie: owner, json: {
+    title: '分享结果', task: '提交结果', alias: 'share', expectedRevision: restored.revision,
+  } }, 201)
+  assert.equal(added.stage.alias, 'share')
+  await data(base + '/stages', { method: 'POST', cookie: owner, json: {
+    title: '重复步骤', task: '不应创建', alias: 'SHARE', expectedRevision: added.course.revision,
+  } }, 409)
+  assert.equal((await data(base, { cookie: owner })).stages.length, 3)
+  const privateCourse = await data('/api/courses', { method: 'POST', cookie: owner, json: {
+    title: '私有步骤别名', alias: 'private-step-alias', stageIds: ['hidden'],
+    newStages: [{ clientId: 'hidden', title: '私有', task: '私有内容', alias: 'intro' }],
+  } }, 201)
+  const denied = await data('/api/view?path=' + encodeURIComponent('/course/private-step-alias/stage/intro'), { cookie: learner })
+  assert.equal(denied.view.status, 404)
+  assert.equal(privateCourse.stages[0].alias, 'intro')
 })
 
 async function oidcFlow({ badSignature = false, badNonce = false } = {}) {

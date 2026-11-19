@@ -3,7 +3,7 @@ import { adminApi } from './admin.js'
 import { courseDetail, courseOverview, listCourses, listStages, stageDetail, studyStageDetail } from './learning.js'
 import { prerequisiteChoices } from './prerequisites.js'
 import { listWishes, wishDetail } from './wishes.js'
-import { resolveCourseId } from './course-access.js'
+import { resolveCourseId, resolveCourseStageId } from './course-access.js'
 
 export function profileFor(user, settings) {
   return { user, hosted: SITES_HOSTED, login: { methods: settings.methods, oidcLabel: settings.oidcLabel } }
@@ -47,8 +47,8 @@ export async function readView(request, env, user, settings, path) {
     }
     if (section === 'stage' && id && !action) return { type: 'stage', course: null, stage: await studyStageDetail(db, user, id) }
     if (section === 'course' && id && action === 'stage' && stageId && !extra) {
-      const [course, stage] = await Promise.all([courseDetail(db, user, id), stageDetail(db, user, stageId, id)])
-      if (!course.stages.some(item => item.id === stageId)) fail(404, '这门课程未引用该关卡。')
+      const resolved = await resolveCourseStageId(db, id, stageId)
+      const [course, stage] = await Promise.all([courseDetail(db, user, id), stageDetail(db, user, resolved, id)])
       if (course.learningLocked) return { type: 'course', course: courseOverview(course) }
       return { type: 'stage', course, stage }
     }

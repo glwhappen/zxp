@@ -18,7 +18,7 @@ import { beginOidc, finishOidc } from './oidc.js'
 import { profileFor, readView } from './views.js'
 import { wishApi } from './wishes.js'
 import { collaborationApi } from './collaboration.js'
-import { resolveCourseId } from './course-access.js'
+import { resolveCourseId, resolveCourseStageId } from './course-access.js'
 
 const scriptPath = `/assets/app.${CLIENT_DIGEST}.js`
 const stylePath = `/assets/style.${CSS_DIGEST}.css`
@@ -60,7 +60,10 @@ async function api(request, env, url) {
   if (resource === 'wishes') return wishApi(request, db, user, url)
   if (resource === 'courses') {
     if (id) id = await resolveCourseId(db, id)
-    if (id && ['sharing', 'versions', 'stages'].includes(action)) return collaborationApi(request, db, user, url, id, action, extra)
+    if (id && ['sharing', 'versions', 'stages'].includes(action)) {
+      const resource = action === 'stages' && extra ? await resolveCourseStageId(db, id, extra) : extra
+      return collaborationApi(request, db, user, url, id, action, resource)
+    }
     if (method === 'GET') {
       return json(id ? courseOverview(await courseDetail(db, user, id)) : await listCourses(db, user, url.searchParams.get('scope') ?? 'public'))
     }

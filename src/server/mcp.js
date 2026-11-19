@@ -69,7 +69,7 @@ tool('course_get', '读取课程详情、关卡顺序和当前用户的学习进
 tool('course_create', '创建课程。stageIds 只能引用自己的关卡，也可用 newStages 在同一次调用里创建新关卡；prerequisites 是课程前置，requires 是关卡依赖。默认私有。', {
   ...course,
   newStages: array({
-    type: 'object', properties: { clientId: string, ...stage }, required: ['clientId', 'title', 'task'],
+    type: 'object', properties: { clientId: string, ...stage, alias: string }, required: ['clientId', 'title', 'task'],
     additionalProperties: false,
   }),
 }, ['title'],
@@ -98,11 +98,13 @@ tool('course_restore', '将课程资料、关卡编排和讲义恢复到历史�
 ({ DB }, user, args) => restoreCourseVersion(DB, user, id(args, 'courseId'), id(args, 'versionId'), args))
 tool('course_lesson_update', '更新本课程里的关卡名称、任务和讲义。', {
   courseId: string, stageId: string, title: string, task: string, tutorial: stage.tutorial,
+  alias: { ...string, description: '当前课程内唯一的步骤别名。留空清除，省略保留。' },
   methods: stage.methods, required: stage.required, requiredFields: array(string), expectedRevision, checkpoint: boolean,
 }, ['courseId', 'stageId', 'title', 'task', 'tutorial', 'expectedRevision'],
 ({ DB }, user, args) => saveCourseLesson(DB, user, id(args, 'courseId'), id(args, 'stageId'), args))
 tool('course_stage_create', '在可编辑课程末尾创建关卡。新关卡使用课程的可见性，可用 required 设定必填提交。', {
   courseId: string, title: stage.title, task: stage.task, tutorial: stage.tutorial, methods: stage.methods,
+  alias: { ...string, description: '可选步骤别名，同一课程内唯一。' },
   required: stage.required, expectedRevision,
 }, ['courseId', 'title', 'task', 'expectedRevision'], ({ DB }, user, args) => addCourseStage(DB, user, id(args, 'courseId'), args))
 tool('stage_list', '列出自己创建、可在自己其他课程复用的关卡。', { scope: enumeration(['available', 'owned']) }, [],

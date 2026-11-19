@@ -66,6 +66,7 @@
       "breakpoints": true
     },
     { "idx": 9, "version": "6", "when": 1795080000000, "tag": "0009_inline_lesson_settings", "breakpoints": true },
-    { "idx": 10, "version": "6", "when": 1795083600000, "tag": "0010_course_aliases", "breakpoints": true }
+    { "idx": 10, "version": "6", "when": 1795083600000, "tag": "0010_course_aliases", "breakpoints": true },
+    { "idx": 11, "version": "6", "when": 1795087200000, "tag": "0011_stage_aliases", "breakpoints": true }
   ]
 }

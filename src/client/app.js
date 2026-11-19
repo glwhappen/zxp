@@ -515,8 +515,8 @@ function courseDraft(editor, form) {
 }
 
 function lessonDraft(form) {
-  const { title, task, tutorial } = Object.fromEntries(new FormData(form))
-  return { title, task, tutorial }
+  const { title, task, tutorial, alias } = Object.fromEntries(new FormData(form))
+  return { title, task, tutorial, alias: (alias ?? '').trim().toLowerCase() }
 }
 
 function courseWriteBody(editor, payload) {
@@ -593,6 +593,7 @@ async function startQuickLesson() {
   const editor = {
     context, userId: state.user.id, course: context.course, stageId: context.stage.id,
     title: context.stage.title, task: context.stage.task, blocks: lessonBlocks(context.stage.tutorial),
+    alias: context.stage.alias ?? '',
     enabled: [...context.stage.methods], required: [...context.stage.required],
     requiredFields: [...context.stage.requiredFields],
   }
@@ -615,6 +616,11 @@ async function startQuickLesson() {
       if (state.quick !== editor || state.user?.id !== editor.userId) return
       context.course = saved.course
       context.stage = { ...context.stage, ...saved.stage }
+      const path = stagePath(editor.stageId, saved.course)
+      if (path !== state.path) {
+        history.replaceState({}, '', path)
+        state.path = path
+      }
       views.invalidate((path, view) => view.course?.id === saved.course.id || ['explore', 'shelf'].includes(view.type))
       cachePage(coursePath(saved.course), { type: 'course', course: saved.course })
       main.querySelector('[data-outline]').innerHTML = progress(saved.course) + outline(saved.course, editor.stageId)
@@ -1571,9 +1577,10 @@ document.addEventListener('submit', async event => {
 
 document.addEventListener('input', event => {
   const input = event.target
-  if (state.quick && input.matches('[data-quick-title], [data-quick-task], [data-quick-property]')) {
+  if (state.quick && input.matches('[data-quick-title], [data-quick-task], [data-quick-alias], [data-quick-property]')) {
     const editor = state.quick
     if (input.matches('[data-quick-title]')) editor.title = input.value
+    else if (input.matches('[data-quick-alias]')) editor.alias = input.value
     else if (input.matches('[data-quick-task]')) editor.task = input.value
     else {
       const block = editor.blocks.find(block => block.id === input.closest('[data-quick-block]').dataset.quickBlock)

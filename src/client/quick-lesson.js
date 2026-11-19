@@ -23,7 +23,8 @@ export function lessonBlocks(tutorial) {
 
 export function lessonPayload(editor) {
   return {
-    title: editor.title, task: editor.task, tutorial: editor.blocks.map(block => block.raw).join(''),
+    title: editor.title, alias: editor.alias.trim().toLowerCase(),
+    task: editor.task, tutorial: editor.blocks.map(block => block.raw).join(''),
     methods: ['learned', ...['answer', 'screenshot', 'file'].filter(kind => editor.enabled.includes(kind))],
     required: ['answer', 'screenshot', 'file'].filter(kind => editor.enabled.includes(kind) && editor.required.includes(kind)),
     requiredFields: editor.requiredFields.filter(key => editor.blocks.some(block => block.fieldKey === key)),
@@ -95,6 +96,10 @@ export function quickLesson(editor) {
   </div>
   <header class="lesson-header quick-heading">
     <label>关卡名称<input data-quick-title value="${esc(editor.title)}" maxlength="100"></label>
+    <label>步骤别名 <span class="subtle">选填</span>
+      <input data-quick-alias value="${esc(editor.alias)}" maxlength="60" minlength="2"
+        pattern="[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*" placeholder="例如 bind" autocapitalize="none" spellcheck="false">
+      <small class="subtle">同一课程内不能重复，2–60 个英文字母、数字或短横线。</small></label>
     <label>学习任务<textarea data-quick-task maxlength="5000" rows="2">${esc(editor.task)}</textarea></label>
     <p class="subtle">点击段落编辑文字。调整下方提问和提交框后会自动保存到当前课程。</p>
   </header>

@@ -303,7 +303,7 @@ dialog[open] { display: flex; flex-direction: column; max-height: calc(100dvh - 
 .quick-toolbar .inline-actions { flex-wrap: wrap; }
 .quick-heading { display: grid; gap: 14px; }
 .quick-heading label { margin: 0; }
-.quick-heading input { font-size: 23px; font-weight: 700; }
+.quick-heading input[data-quick-title] { font-size: 23px; font-weight: 700; }
 .quick-blocks { display: grid; gap: 12px; margin: 16px 0; }
 .quick-block { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: white; padding: 18px; }
 .quick-text { padding: 8px 12px; }
