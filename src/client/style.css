@@ -33,7 +33,7 @@ main:focus { outline: 0; }
 .brand strong, .brand small { display: block; }
 .brand strong { font-size: 19px; font-weight: 800; letter-spacing: .035em; line-height: 1.4; }
 .brand small { font-size: 9px; font-weight: 800; letter-spacing: .11em; color: var(--muted); margin-top: 3px; }
-.brand-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; background: linear-gradient(140deg, #8257ee, #5a36c0); color: white; box-shadow: 0 3px 8px #6c40df38; }
+.brand-icon { display: block; width: 42px; height: 42px; flex: none; object-fit: contain; }
 .nav-group + .nav-group { margin-top: 27px; }
 .nav-title { font-weight: 650; font-size: 12px; color: #767185; padding-left: 12px; margin-bottom: 10px; }
 .nav-link { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 12px; width: 100%; margin: 2px 0; border-radius: 9px; text-align: left; font-weight: 600; font-size: 14px; color: #534d62; border: 0; background: transparent; }

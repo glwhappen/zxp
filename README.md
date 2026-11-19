@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./docs/assets/logo.svg" width="88" height="88" alt="知行谱标志">
+  <img src="./assets/brand/logo.png" width="88" height="88" alt="知行谱标志：书页组成向上的 Z 形路径">
   <h1>知行谱 · ZXP</h1>
   <p><strong>用可复用的关卡编排实战课程</strong></p>
   <p>编写教程、穿插练习，在每一步提交答案、截图或作品。</p>

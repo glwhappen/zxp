@@ -1,0 +1,30 @@
+知行谱 / ZXP logo
+
+生成方式：内置 image_gen 绘图工具，先生成图形，再进行纯色清理。
+设计方向：书页组成 Z 形路径，呼应从学习走向实践。
+品牌色：#633BCC；图形：白色；圆角外部：透明。
+
+source.png：模型生成的最终原图，保留透明通道。
+logo.png：256 × 256，供 README 使用。
+logo.webp：256 × 256，供网站导航使用，减少加载体积。
+favicon.png：32 × 32，供浏览器标签页使用。
+apple-touch-icon.png：180 × 180，供添加到主屏幕使用。
+小尺寸文件通过等比例缩放和 PNG / WebP 压缩生成，不依赖线上图像服务。
+
+初始生成提示词
+----------------
+Use case: logo-brand.
+Asset type: production app icon and website logo for 知行谱 (ZXP), an open-source platform for learning skills through practical lessons and incremental exercises.
+Primary request: Design one exceptionally simple, distinctive, beautifully balanced logo. A bold abstract open book transforms into a rising stepped ribbon; the negative space subtly suggests the letter Z. Express learning becoming action using a single coherent geometric silhouette, not separate pictograms. Use only two or three broad folded shapes, generous clear gaps, and gently softened corners. The mark must read immediately at 24px.
+Style: flat vector-like precision, refined modern editorial identity with a quiet scholarly feel. Solid warm white mark on a solid deep violet rounded-square tile, violet matching #633BCC from the existing website. No gradients, texture, 3D, bevels, lighting, cast shadows, strokes, thin details, sparkles, check marks, cube or graduation cap.
+Composition: one centered icon only, straight-on square composition. Rounded-square violet tile occupies 94% of the canvas, with truly transparent space outside its rounded corners. The white emblem occupies about 62% of the tile, with optically balanced padding on all sides. Strong silhouette and elegant negative space.
+Text: none. No lettering, no Chinese characters, no wordmark, no watermark, no mockup, no alternative concepts or presentation board. Output the final icon asset only with genuine transparency outside the tile.
+
+定稿清理提示词
+----------------
+Use case: logo-brand. Image 1 is the edit target, the newly generated 知行谱 / ZXP app icon.
+Make a single targeted cleanup: turn this into an immaculate two-color flat brand asset.
+Keep the exact overall composition, the rounded-square tile, and the recognizable white Z/open-book silhouette, including its folds, spacing, position, and scale. Do not redesign the mark.
+Replace the entire purple tile interior with one perfectly uniform solid #633BCC color. Replace the white emblem interior with perfectly uniform pure white #FFFFFF. Remove every gradient, texture, dark stain, left-side smudge, halo, colored edge artifact, grain and shadow. Edges must be smooth, clean and crisply anti-aliased. Keep the space outside the rounded-square tile genuinely transparent, with no stray pixels or colored fringing.
+The final output must be just this one centered production-ready icon. No text, no lettering, no watermark, no mockup, no extra ornament.
+

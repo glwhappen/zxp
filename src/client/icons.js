@@ -1,5 +1,4 @@
 const paths = {
-  logo: '<path d="m12 2 9 5v10l-9 5-9-5V7z"/><path d="m3 7 9 5 9-5M12 12v10M7.5 4.5l9 5"/>',
   compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/>',
   book: '<path d="M12 7c-2.5-2-5-2.6-9-2v13c4-.6 6.5 0 9 2 2.5-2 5-2.6 9-2V5c-4-.6-6.5 0-9 2zm0 0v13"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',

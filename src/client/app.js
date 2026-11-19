@@ -202,7 +202,7 @@ function paintShell() {
     ['学习', [['/', '探索课程', 'compass'], ['/learning', '我的学习', 'book'], ['/wishes', '课程许愿', 'spark']]],
     ['创作', [['/owned', '我的创作', 'grid'], ['/stages', '我的关卡', 'layers']]],  ]
   if (state.user?.isAdmin) sections.push(['管理', [['/admin', '管理后台', 'lock']]])
-  sidebar.innerHTML = `<a class="brand" href="/" data-link><span class="brand-icon">${icon('logo', 23)}</span>
+  sidebar.innerHTML = `<a class="brand" href="/" data-link><img class="brand-icon" src="/assets/logo-v2.webp" width="42" height="42" alt="" decoding="async">
     <span><strong>${productName}</strong><small>ZXP</small></span></a>
     <nav aria-label="主要导航">${sections.map(([heading, links]) => `<div class="nav-group"><div class="nav-title">${heading}</div>
       ${links.map(([url, label, symbol]) => `<a class="nav-link ${active === url ? 'active' : ''}" href="${url}" data-link

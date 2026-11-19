@@ -2,6 +2,9 @@ import page from '../client/index.html'
 import css from '../client/style.css'
 import client from 'client-bundle'
 import qrCodePanlama from './qr-panlama.webp'
+import brandLogo from '../../assets/brand/logo.webp'
+import favicon from '../../assets/brand/favicon.png'
+import touchIcon from '../../assets/brand/apple-touch-icon.png'
 import { authenticate, identify, manageToken } from './auth.js'
 import { checkOrigin, fail, json, objectBody, readBytes, RequestError, requireUser } from './core.js'
 import { seedExamples } from './examples.js'
@@ -27,6 +30,9 @@ const assets = new Map([
   [scriptPath, [client, 'text/javascript; charset=utf-8']],
   [stylePath, [css, 'text/css; charset=utf-8']],
   ['/assets/qr-panlama.webp', [qrCodePanlama, 'image/webp']],
+  ['/assets/logo-v2.webp', [brandLogo, 'image/webp']],
+  ['/assets/favicon-v2.png', [favicon, 'image/png']],
+  ['/assets/apple-touch-icon-v2.png', [touchIcon, 'image/png']],
 ])
 const security = {
   'Content-Security-Policy': "default-src 'self'; img-src 'self' https: data:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'",
