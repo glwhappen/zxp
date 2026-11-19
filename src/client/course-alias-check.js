@@ -24,7 +24,7 @@ export function mountCourseAliasCheck(form, { api, courseId, isCurrent }) {
       <span class="alias-actions">${conflict.accessible ? `<a href="${esc(conflict.path)}" target="_blank" rel="noopener noreferrer">打开占用课程 ↗</a>` : ''}
       ${result.suggestion ? `<button type="button" class="text-btn" data-alias-suggestion="${esc(result.suggestion)}">使用 ${esc(result.suggestion)}</button>` : ''}</span>`
   }
-  function schedule() {
+  function schedule(event) {
     clearTimeout(timer)
     const version = ++request
     input.setCustomValidity('')
@@ -32,7 +32,7 @@ export function mountCourseAliasCheck(form, { api, courseId, isCurrent }) {
     status.className = 'alias-status'
     status.replaceChildren()
     const alias = value()
-    if (!alias || !input.checkValidity()) return
+    if (event?.isComposing || !alias || !input.checkValidity()) return
     timer = setTimeout(async () => {
       if (!active()) return
       status.textContent = '正在检查地址…'
@@ -55,6 +55,7 @@ export function mountCourseAliasCheck(form, { api, courseId, isCurrent }) {
     input.focus()
   }
   input.addEventListener('input', schedule)
+  input.addEventListener('compositionend', schedule)
   status.addEventListener('click', click)
   return {
     show,
@@ -62,6 +63,7 @@ export function mountCourseAliasCheck(form, { api, courseId, isCurrent }) {
       clearTimeout(timer)
       request++
       input.removeEventListener('input', schedule)
+      input.removeEventListener('compositionend', schedule)
       status.removeEventListener('click', click)
     },
   }

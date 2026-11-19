@@ -50,3 +50,50 @@ test('autosave preserves the draft after a revision conflict', async () => {
   autosave.discard()
   assert.equal(autosave.dirty(), false)
 })
+
+test('correcting an invalid alias clears the save error, including a return to the saved value', async () => {
+  for (const corrected of ['available', 'original']) {
+    const states = []
+    const writes = []
+    const autosave = createCourseAutosave({
+      delay: 10_000,
+      status: (message, kind) => states.push({ message, kind }),
+      async send(key, draft) {
+        writes.push(draft.alias)
+        if (draft.alias === 'ai-video') throw Object.assign(new Error('课程别名已被使用。'), { status: 409 })
+      },
+    })
+    autosave.remember('course', { alias: 'original' })
+    autosave.queue('course', { alias: 'ai-video' })
+    assert.equal(await autosave.flush(), false)
+    assert.equal(states.at(-1).kind, 'error')
+    autosave.queue('course', { alias: corrected })
+    assert.equal(states.at(-1).kind, undefined)
+    assert.equal(await autosave.flush(), true)
+    assert.deepEqual(states.at(-1), { message: '已保存', kind: undefined })
+    assert.deepEqual(writes, corrected === 'original' ? ['ai-video'] : ['ai-video', 'available'])
+    autosave.discard()
+  }
+})
+
+test('a late alias rejection cannot replace the status of a newer valid draft', async () => {
+  const pending = Promise.withResolvers()
+  const states = []
+  const writes = []
+  const autosave = createCourseAutosave({
+    status: (message, kind) => states.push({ message, kind }),
+    async send(key, draft) {
+      writes.push(draft.alias)
+      if (draft.alias === 'ai-video') await pending.promise
+    },
+  })
+  autosave.queue('course', { alias: 'ai-video' })
+  const saving = autosave.flush()
+  autosave.queue('course', { alias: 'ai-wx-video' })
+  pending.reject(Object.assign(new Error('旧的别名冲突。'), { status: 409 }))
+  assert.equal(await saving, true)
+  assert.deepEqual(writes, ['ai-video', 'ai-wx-video'])
+  assert.equal(states.some(state => state.kind === 'error'), false)
+  assert.equal(states.at(-1).message, '已保存')
+  autosave.discard()
+})

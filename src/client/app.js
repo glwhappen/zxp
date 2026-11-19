@@ -1716,7 +1716,7 @@ document.addEventListener('submit', async event => {
   }
 })
 
-document.addEventListener('input', event => {
+function handleInput(event) {
   const input = event.target
   if (state.quick && input.matches('[data-quick-title], [data-quick-task], [data-quick-alias], [data-quick-property]')) {
     const editor = state.quick
@@ -1785,7 +1785,11 @@ document.addEventListener('input', event => {
     if (feature) feature.hidden = Boolean(state.query)
     paintResults(state.current.courses)
   }
-})
+}
+
+document.addEventListener('input', handleInput)
+// Some IMEs finish without a final non-composing input event.
+document.addEventListener('compositionend', handleInput)
 
 document.addEventListener('keydown', event => {
   if (!state.quick || !event.target.matches('.quick-text-preview') || !['Enter', ' '].includes(event.key)) return
