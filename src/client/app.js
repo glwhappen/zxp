@@ -2,7 +2,7 @@ import { icon } from './icons.js'
 import { adminPage, providerNames } from './admin.js'
 import { createViewCache } from './view-cache.js'
 import { createCourseAutosave } from './course-autosave.js'
-import { lessonBlocks, lessonPayload, quickBlock, quickLesson, updateBlock } from './quick-lesson.js'
+import { lessonBlocks, lessonPayload, lessonReferences, mergeTextBlocks, quickBlock, quickFieldPreview, quickLesson, updateBlock } from './quick-lesson.js'
 import { captureScreenshot, pasteScreenshot } from './screen-capture.js'
 import { courseHistory, courseSharingForm, courseVersionPreview, editorChoices } from './collaboration.js'
 import { wishBoard, wishCoursePicker, wishCourses, wishDiscussion, wishForm, wishHeading, wishPage, wishPath } from './wishes.js'
@@ -53,7 +53,10 @@ async function refreshIdentity() {
 
 function applyProfile(profile) {
   if (state.user?.id !== profile.user?.id) state.editor?.autosave?.discard()
-  if (state.user?.id !== profile.user?.id) state.quick?.autosave.discard()
+  if (state.user?.id !== profile.user?.id) {
+    state.quick?.autosave.discard()
+    destroyQuickEditors()
+  }
   views.acceptIdentity(profile.user?.id ?? null)
   Object.assign(state, profile)
 }
@@ -271,6 +274,7 @@ function stagesPage(stages) {
 
 function paintView({ profile, view }, path) {
   state.editor?.autosave?.discard()
+  destroyQuickEditors()
   state.quick?.autosave.discard()
   state.quick = null
   applyProfile(profile)
@@ -360,6 +364,7 @@ function refreshView(path, version) {
 
 async function navigate(path = location.pathname, push = false, focus = false) {
   closeZoom()
+  flushQuickEditors()
   const version = ++navigation
   if (state.quick?.autosave.dirty() && !await state.quick.autosave.flush()) {
     if (version === navigation && location.pathname !== state.path) history.pushState({}, '', state.path)
@@ -588,6 +593,12 @@ function fitQuickTitle() {
   if (!title) return
   title.style.height = 'auto'
   title.style.height = title.scrollHeight + 2 + 'px'
+  fitQuickToolbar()
+}
+
+function fitQuickToolbar() {
+  const toolbar = main.querySelector('.quick-toolbar')
+  if (toolbar) main.querySelector('.lesson').style.setProperty('--quick-toolbar-height', toolbar.offsetHeight + 'px')
 }
 
 window.addEventListener('resize', fitQuickTitle)
@@ -605,6 +616,7 @@ async function startQuickLesson() {
     alias: context.stage.alias ?? '',
     enabled: [...context.stage.methods], required: [...context.stage.required],
     requiredFields: [...context.stage.requiredFields],
+    richEditors: new Map(), richOpening: new Map(),
   }
   state.quick = editor
   main.querySelector('.lesson').classList.add('quick-lesson')
@@ -617,6 +629,7 @@ async function startQuickLesson() {
       status.textContent = message
       status.toggleAttribute('data-error', Boolean(kind))
       main.querySelector('[data-quick-reload]').hidden = !kind
+      fitQuickToolbar()
     },
     async send(target, payload) {
       const saved = await api('courses/' + key(editor.course.id) + '/stages/' + key(editor.stageId), {
@@ -646,7 +659,111 @@ function queueQuickLesson() {
 
 function paintQuickBlocks() {
   const editor = state.quick
+  destroyQuickEditors()
+  editor.blocks = mergeTextBlocks(editor.blocks)
   main.querySelector('[data-quick-blocks]').innerHTML = editor.blocks.map((block, index) => quickBlock(block, editor, index)).join('')
+}
+
+function destroyQuickEditors() {
+  for (const rich of state.quick?.richEditors?.values() ?? []) rich.destroy()
+  state.quick?.richEditors?.clear()
+  state.quick?.richOpening?.clear()
+}
+
+function flushQuickEditors() {
+  for (const rich of state.quick?.richEditors?.values() ?? []) rich.flush()
+}
+
+let markdownEditorModule
+let markdownEditorAttempt = 0
+async function openQuickText(control) {
+  const editor = state.quick
+  if (!editor || state.user?.id !== editor.userId) return
+  const container = control.closest('[data-quick-block]')
+  const id = container.dataset.quickBlock
+  if (editor.richEditors.has(id)) { editor.richEditors.get(id).focus(); return }
+  if (editor.richOpening.has(id)) return
+  const block = editor.blocks.find(block => block.id === id)
+  const mount = container.querySelector('[data-rich-mount]')
+  const opening = {}
+  editor.richOpening.set(id, opening)
+  mount.hidden = false
+  mount.innerHTML = '<p class="subtle" role="status">正在打开编辑器…</p>'
+  control.hidden = true
+  try {
+    const modulePath = MARKDOWN_EDITOR_PATH + (markdownEditorAttempt ? '?retry=' + markdownEditorAttempt : '')
+    markdownEditorModule ??= import(modulePath).catch(error => {
+      markdownEditorModule = null
+      markdownEditorAttempt++
+      throw error
+    })
+    const { mountMarkdownEditor } = await markdownEditorModule
+    if (state.quick !== editor || state.user?.id !== editor.userId || !mount.isConnected || editor.richOpening.get(id) !== opening) return
+    const rich = mountMarkdownEditor(mount, {
+      markdown: block.raw, references: lessonReferences(editor),
+      onChange(raw) {
+        if (state.quick !== editor || state.user?.id !== editor.userId || !mount.isConnected) return
+        updateBlock(block, { dataset: { quickProperty: 'text' }, value: raw })
+        queueQuickLesson()
+      },
+      onInsert: (type, split) => addQuickBlock(type, id, split),
+      onClose() {
+        editor.richEditors.get(id)?.destroy()
+        editor.richEditors.delete(id)
+        container.outerHTML = quickBlock(block, editor, editor.blocks.indexOf(block))
+      },
+    })
+    editor.richEditors.set(id, rich)
+  } catch {
+    if (state.quick === editor && mount.isConnected) {
+      mount.hidden = true
+      control.hidden = false
+      announce('编辑器加载失败，请点击正文重试。', true)
+    }
+  } finally {
+    if (editor.richOpening.get(id) === opening) editor.richOpening.delete(id)
+  }
+}
+
+function addQuickBlock(type, afterId, split) {
+  const editor = state.quick
+  if (!editor || !['text', 'question', ...submissionKinds].includes(type)) return
+  flushQuickEditors()
+  if (submissionKinds.includes(type) && editor.blocks.some(block => block.type === type)) {
+    const existing = editor.blocks.find(block => block.type === type)
+    const container = main.querySelector(`[data-quick-block="${existing.id}"]`)
+    container.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    container.querySelector('[data-quick-property="prompt"]').focus({ preventScroll: true })
+    announce('这类提交框已存在，已定位到原位置。')
+    return
+  }
+  const question = type === 'question'
+  const block = { id: crypto.randomUUID(), type, name: '新问题', fieldKey: 'q-' + crypto.randomUUID(), options: [], prompt: '请在这里填写具体的提交要求' }
+  block.raw = type === 'text' ? '新段落\n\n' : question
+    ? '{{ask:新问题||key=' + block.fieldKey + '}}\n\n' : submissionMarker(type, block.prompt) + '\n\n'
+  let targetId = block.id
+  const after = editor.blocks.findIndex(item => item.id === afterId)
+  if (split && after >= 0 && editor.blocks[after].type === 'text') {
+    const original = editor.blocks[after]
+    const replacement = []
+    if (split[0].trim()) replacement.push({ ...original, raw: split[0].trimEnd() + '\n\n' })
+    replacement.push(block)
+    if (split[1].trim()) replacement.push({ id: replacement.length > 1 ? crypto.randomUUID() : original.id, type: 'text', raw: split[1].trimEnd() + '\n\n' })
+    editor.blocks.splice(after, 1, ...replacement)
+  } else {
+    const index = after < 0 ? editor.blocks.length : after + 1
+    const previous = editor.blocks[index - 1]
+    if (type === 'text' && previous?.type === 'text') targetId = previous.id
+    if (previous && !previous.raw.endsWith('\n\n')) previous.raw += '\n\n'
+    editor.blocks.splice(index, 0, block)
+  }
+  if (submissionKinds.includes(type)) editor.enabled.push(type)
+  paintQuickBlocks()
+  queueQuickLesson()
+  const container = main.querySelector(`[data-quick-block="${targetId}"]`)
+  container.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  if (type === 'text') openQuickText(container.querySelector('.quick-text-preview'))
+  else container.querySelector('[data-quick-property]').focus({ preventScroll: true })
 }
 
 async function searchCollaborators() {
@@ -818,21 +935,17 @@ async function handleAction(control) {
       break
     }
     case 'quick-text': {
-      const block = control.closest('[data-quick-block]')
-      block.querySelector('.quick-text-preview').hidden = true
-      const area = block.querySelector('.quick-text-input')
-      area.hidden = false
-      const input = area.querySelector('textarea')
-      input.style.height = input.scrollHeight + 'px'
-      input.focus()
+      await openQuickText(control)
       break
     }
     case 'quick-done':
     case 'quick-reload': {
       const editor = state.quick
+      if (action === 'quick-done') flushQuickEditors()
       if (action === 'quick-done' && !await editor.autosave.flush()) break
       if (state.quick !== editor) break
       editor.autosave.discard()
+      destroyQuickEditors()
       state.quick = null
       views.invalidate((path) => path === state.path)
       await navigate()
@@ -840,6 +953,7 @@ async function handleAction(control) {
     }
     case 'quick-checkpoint': {
       const editor = state.quick
+      flushQuickEditors()
       if (!await editor.autosave.flush() || state.quick !== editor) break
       const saved = await api('courses/' + key(editor.course.id) + '/stages/' + key(editor.stageId), {
         method: 'PUT', body: { ...lessonPayload(editor), checkpoint: true,
@@ -852,32 +966,15 @@ async function handleAction(control) {
       break
     }
     case 'quick-add': {
-      const editor = state.quick
       const type = control.dataset.type ?? main.querySelector('[data-quick-type]').value
-      if (type !== 'text' && type !== 'question' && editor.blocks.some(block => block.type === type)) {
-        announce('这类提交框已经存在，可以在原位置编辑。')
-        break
-      }
-      const question = type === 'question'
-      const block = {
-        id: crypto.randomUUID(), type, name: '新问题', fieldKey: 'q-' + crypto.randomUUID(),
-        options: [], prompt: '请在这里填写具体的提交要求',
-      }
-      block.raw = type === 'text' ? '新段落\n\n' : question
-        ? '{{ask:新问题||key=' + block.fieldKey + '}}\n\n' : submissionMarker(type, block.prompt) + '\n\n'
-      if (editor.blocks.length && !editor.blocks.at(-1).raw.endsWith('\n\n')) editor.blocks.at(-1).raw += '\n\n'
-      const after = editor.blocks.findIndex(item => item.id === control.dataset.after)
-      editor.blocks.splice(after < 0 ? editor.blocks.length : after + 1, 0, block)
-      if (!question && type !== 'text') editor.enabled.push(type)
-      paintQuickBlocks()
-      queueQuickLesson()
-      main.querySelector(`[data-quick-block="${block.id}"]`).scrollIntoView({ block: 'center', behavior: 'smooth' })
+      addQuickBlock(type, control.dataset.after)
       break
     }
     case 'quick-up':
     case 'quick-down':
     case 'quick-remove': {
       const editor = state.quick
+      flushQuickEditors()
       const index = editor.blocks.findIndex(block => block.id === id)
       if (index < 0) break
       if (action === 'quick-remove') {
@@ -1558,6 +1655,7 @@ document.addEventListener('click', async event => {
   }
   const control = event.target.closest('[data-action]')
   if (!control || control.disabled) return
+  if (control.dataset.action === 'quick-text') event.preventDefault()
   control.disabled = true
   try { await handleAction(control) } catch (error) { announce(error.message, true) } finally { control.disabled = false }
 })
@@ -1606,7 +1704,11 @@ document.addEventListener('input', event => {
         if (property === 'enabled' && !input.checked) editor.required = editor.required.filter(value => value !== kind)
         const container = input.closest('[data-quick-block]')
         container.outerHTML = quickBlock(block, editor, editor.blocks.indexOf(block))
-      } else updateBlock(block, input)
+      } else {
+        updateBlock(block, input)
+        const preview = input.closest('[data-quick-block]').querySelector('[data-quick-field-preview]')
+        if (preview) preview.outerHTML = quickFieldPreview(block, editor)
+      }
     }
     if (!event.isComposing) queueQuickLesson()
     return
@@ -1651,13 +1753,10 @@ document.addEventListener('input', event => {
   }
 })
 
-document.addEventListener('focusout', event => {
-  if (!state.quick || !event.target.matches('[data-quick-property="text"]')) return
-  const container = event.target.closest('[data-quick-block]')
-  if (container.contains(event.relatedTarget)) return
-  const editor = state.quick
-  const block = editor.blocks.find(block => block.id === container.dataset.quickBlock)
-  container.outerHTML = quickBlock(block, editor, editor.blocks.indexOf(block))
+document.addEventListener('keydown', event => {
+  if (!state.quick || !event.target.matches('.quick-text-preview') || !['Enter', ' '].includes(event.key)) return
+  event.preventDefault()
+  openQuickText(event.target)
 })
 
 // iOS Safari 忽略 user-scalable=no，用 gesture 事件挡住双指缩放。

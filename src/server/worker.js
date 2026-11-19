@@ -1,6 +1,7 @@
 import page from '../client/index.html'
 import css from '../client/style.css'
 import client from 'client-bundle'
+import markdownEditor from 'editor-bundle'
 import qrCodePanlama from './qr-panlama.webp'
 import brandLogo from '../../assets/brand/logo.webp'
 import favicon from '../../assets/brand/favicon.png'
@@ -29,6 +30,7 @@ const renderedPage = page.replace('/app.js', scriptPath).replace('/style.css', s
 const assets = new Map([
   [scriptPath, [client, 'text/javascript; charset=utf-8']],
   [stylePath, [css, 'text/css; charset=utf-8']],
+  [`/assets/markdown-editor.${EDITOR_DIGEST}.js`, [markdownEditor, 'text/javascript; charset=utf-8']],
   ['/assets/qr-panlama.webp', [qrCodePanlama, 'image/webp']],
   ['/assets/logo-v2.webp', [brandLogo, 'image/webp']],
   ['/assets/favicon-v2.png', [favicon, 'image/png']],
